@@ -1,0 +1,5 @@
+JWT_SECRET=troque-este-segredo-local
+JWT_TTL_DAYS=7
+# Opcional: configure um unsigned upload preset no Cloudinary.
+CLOUDINARY_CLOUD_NAME=
+CLOUDINARY_UPLOAD_PRESET=

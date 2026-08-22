@@ -1,0 +1,27 @@
+{
+  "name": "livro-perto",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "dev:setup": "npm --prefix worker run db:migrate:local && npm --prefix worker run db:seed:local",
+    "dev:api": "npm --prefix worker run dev",
+    "dev:full": "node scripts/dev-local.mjs",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@vitejs/plugin-react": "latest",
+    "lucide-react": "latest",
+    "react": "latest",
+    "react-dom": "latest",
+    "react-router-dom": "latest",
+    "vite": "latest"
+  },
+  "devDependencies": {
+    "@types/react": "latest",
+    "@types/react-dom": "latest",
+    "typescript": "latest"
+  }
+}

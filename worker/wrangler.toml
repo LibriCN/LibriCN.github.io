@@ -1,0 +1,23 @@
+name = "livro-perto-api"
+main = "src/index.ts"
+compatibility_date = "2026-08-18"
+
+[dev]
+port = 8787
+local_protocol = "http"
+
+[vars]
+# Em produção, troque pelos domínios reais do frontend e API.
+CORS_ORIGIN = "LibriCN.github.io"
+CITY_NAME = "Currais Novos RN"
+JWT_TTL_DAYS = "7"
+# Opcional, para upload sem assinatura no painel:
+# CLOUDINARY_CLOUD_NAME = "..."
+# CLOUDINARY_UPLOAD_PRESET = "..."
+
+[[d1_databases]]
+binding = "DB"
+database_name = "livro-perto-db"
+# Preencha este valor após criar o banco com `wrangler d1 create livro-perto-db`.
+database_id = "3336cb6d-36d0-4c12-bea6-b71ec6406c16"
+migrations_dir = "migrations"
