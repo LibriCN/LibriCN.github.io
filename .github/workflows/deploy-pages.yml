@@ -30,11 +30,11 @@ jobs:
       - name: Gerar build estático
         run: npm run build
         env:
-          VITE_API_URL: ${{ vars.VITE_API_URL }}
-          VITE_BASE_PATH: ${{ vars.VITE_BASE_PATH }}
-          VITE_CITY_NAME: ${{ vars.VITE_CITY_NAME }}
-          VITE_CITY_SYMBOL: ${{ vars.VITE_CITY_SYMBOL }}
-          VITE_ADMIN_PATH: ${{ vars.VITE_ADMIN_PATH }}
+          VITE_API_URL: ${{ vars.VITE_API_URL || 'https://livro-perto-api.livro-perto.workers.dev' }}
+          VITE_BASE_PATH: ${{ vars.VITE_BASE_PATH || '/' }}
+          VITE_CITY_NAME: ${{ vars.VITE_CITY_NAME || 'Currais Novos RN' }}
+          VITE_CITY_SYMBOL: ${{ vars.VITE_CITY_SYMBOL || '✦' }}
+          VITE_ADMIN_PATH: ${{ vars.VITE_ADMIN_PATH || '/admin' }}
       - name: Permitir rotas diretas no GitHub Pages
         run: cp dist/index.html dist/404.html
       - name: Configurar Pages

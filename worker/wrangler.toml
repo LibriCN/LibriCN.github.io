@@ -8,7 +8,7 @@ local_protocol = "http"
 
 [vars]
 # Em produção, troque pelos domínios reais do frontend e API.
-CORS_ORIGIN = "LibriCN.github.io"
+CORS_ORIGIN = "https://LibriCN.github.io"
 CITY_NAME = "Currais Novos RN"
 JWT_TTL_DAYS = "7"
 # Opcional, para upload sem assinatura no painel:
