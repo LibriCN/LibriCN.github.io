@@ -4,7 +4,8 @@ import { verifyJwt } from './crypto'
 export function corsHeaders(request: Request, env: Env) {
   const origin = request.headers.get('Origin') || ''
   const allowed = (env.CORS_ORIGIN || '').split(',').map(value => value.trim()).filter(Boolean)
-  const allowOrigin = allowed.includes(origin) ? origin : allowed[0] || '*'
+  const matchingOrigin = allowed.find(value => value.toLowerCase() === origin.toLowerCase())
+  const allowOrigin = matchingOrigin ? origin : allowed[0] || '*'
   return { 'Access-Control-Allow-Origin': allowOrigin, 'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type,Authorization', 'Access-Control-Max-Age': '86400', Vary: 'Origin' }
 }
 
