@@ -192,6 +192,18 @@ h1, h2, h3 { line-height: 1.2; }
 .collection-recent { display: grid; gap: 0; }
 .collection-recent > div { display: flex; align-items: center; gap: 8px; padding: 10px 15px; border-top: 1px solid var(--line); color: var(--muted); font-size: 11px; }
 .collection-recent svg { color: var(--red-light); }
+.collection-results { display: grid; gap: 7px; margin-top: 14px; }
+.collection-results-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; color: var(--red-light); font-size: 12px; }
+.collection-results-heading span { color: var(--muted); font-size: 10px; }
+.collection-result { display: flex; align-items: center; gap: 10px; width: 100%; padding: 10px; border: 1px solid var(--line); border-radius: 5px; background: #151515; color: var(--text); text-align: left; }
+.collection-result:hover, .collection-result:focus-visible { border-color: var(--red); background: #211619; }
+.collection-result > div:nth-child(2) { min-width: 0; flex: 1; }
+.collection-result strong, .collection-result span, .collection-result small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.collection-result strong { font-size: 12px; }
+.collection-result span { margin-top: 3px; color: var(--muted); font-size: 10px; }
+.collection-result small { margin-top: 3px; color: var(--faint); font-size: 9px; }
+.collection-result > svg { flex: none; color: var(--red-light); }
+.library-streaming-catalog { margin-top: 15px; }
 @media (max-width: 760px) { .collection-panel { padding: 14px; } .collection-search { align-items: stretch; flex-wrap: wrap; padding: 8px; } .collection-search input { flex-basis: calc(100% - 28px); } .collection-search .button { width: 100%; } .collection-fields { grid-template-columns: 1fr 1fr; gap: 8px; } .collection-actions { flex-direction: column; } .collection-actions .button { width: 100%; } }
 
 /* Catálogo em trilhos, pensado primeiro para toque e telas estreitas. */

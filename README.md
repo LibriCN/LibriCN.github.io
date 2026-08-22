@@ -219,6 +219,8 @@ Todas exigem `Authorization: Bearer <JWT>`.
 
 O cadastro administrativo oferece “Buscar em base externa”. O Worker consulta a Open Library e normaliza título, autores, ISBN, ano, assunto, descrição e capa. Se `GOOGLE_BOOKS_API_KEY` estiver configurada, ela pode servir como segunda fonte quando a Open Library não retornar resultados.
 
+Na coleta rápida, a busca apresenta várias opções antes de importar. Quando a Open Library possui uma edição em português, o sistema usa o título, ISBN e capa dessa edição; categorias comuns são normalizadas para português, como `Ficção científica`, `Fantasia`, `Infantil`, `História` e `Biografia`.
+
 Essa busca é auxiliar: se estiver indisponível, o formulário continua aceitando cadastro manual. Em produção, respeite limites, termos de uso e atribuições das APIs externas.
 
 ## Segurança
