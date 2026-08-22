@@ -1,6 +1,13 @@
 const PBKDF2_ITERATIONS = 100_000
 const HASH_BYTES = 32
 
+export async function hashPassword(password: string) {
+  if (password.length < 8) throw new Error('A senha precisa ter pelo menos 8 caracteres.')
+  const salt = crypto.getRandomValues(new Uint8Array(16))
+  const derived = await derive(password, salt)
+  return `pbkdf2$${PBKDF2_ITERATIONS}$${toBase64(salt)}$${toBase64(derived)}`
+}
+
 function toBase64(value: ArrayBuffer | Uint8Array) {
   const bytes = value instanceof Uint8Array ? value : new Uint8Array(value)
   let binary = ''

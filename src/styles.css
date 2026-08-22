@@ -193,3 +193,31 @@ h1, h2, h3 { line-height: 1.2; }
 .collection-recent > div { display: flex; align-items: center; gap: 8px; padding: 10px 15px; border-top: 1px solid var(--line); color: var(--muted); font-size: 11px; }
 .collection-recent svg { color: var(--red-light); }
 @media (max-width: 760px) { .collection-panel { padding: 14px; } .collection-search { align-items: stretch; flex-wrap: wrap; padding: 8px; } .collection-search input { flex-basis: calc(100% - 28px); } .collection-search .button { width: 100%; } .collection-fields { grid-template-columns: 1fr 1fr; gap: 8px; } .collection-actions { flex-direction: column; } .collection-actions .button { width: 100%; } }
+
+/* Catálogo em trilhos, pensado primeiro para toque e telas estreitas. */
+.streaming-catalog { display: grid; gap: 30px; margin-top: 30px; }
+.book-rail { min-width: 0; }
+.book-rail .section-heading { margin-bottom: 10px; }
+.book-rail-scroller { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(142px, 16%); gap: 12px; overflow-x: auto; padding: 2px 2px 12px; scrollbar-width: thin; }
+.book-tile { display: flex; min-width: 0; flex-direction: column; gap: 5px; color: var(--text); }
+.book-tile .book-cover { width: 100%; height: 205px; border-radius: 7px; box-shadow: 0 9px 18px rgba(0,0,0,.2); transition: transform .18s ease, box-shadow .18s ease; }
+.book-tile:hover .book-cover, .book-tile:focus-visible .book-cover { transform: translateY(-4px); box-shadow: 0 13px 24px rgba(0,0,0,.28); }
+.book-tile-title { overflow: hidden; font-size: 12px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+.book-tile small { overflow: hidden; color: var(--muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.location-section { color: var(--red-light) !important; font-weight: 700; }
+.section-editor-add { display: grid; grid-template-columns: 1fr 1.4fr auto; gap: 8px; margin-bottom: 9px; }
+.section-editor-add input { min-width: 0; }
+.section-editor-list { display: grid; gap: 5px; margin-bottom: 12px; }
+.section-editor-list > div { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 4px; background: #151515; font-size: 11px; }
+.section-editor-list span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.library-scope-picker { display: grid; gap: 7px; margin-top: 15px; padding: 12px; border: 1px solid var(--line); border-radius: 4px; }
+.checkbox-line { display: flex; align-items: center; gap: 8px; margin: 0 !important; color: var(--muted); font-size: 11px; }
+.checkbox-line input { width: auto; margin: 0; }
+@media (max-width: 760px) {
+  .book-rail-scroller { grid-auto-columns: minmax(126px, 38vw); gap: 10px; margin-right: -14px; padding-right: 16px; }
+  .book-tile .book-cover { height: 182px; }
+  .streaming-catalog { gap: 25px; margin-top: 24px; }
+  .section-editor-add { grid-template-columns: 1fr; }
+  .section-editor-add .button { width: 100%; }
+  .book-rail .section-heading h2 { font-size: 20px; }
+}

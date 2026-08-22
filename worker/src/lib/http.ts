@@ -1,4 +1,4 @@
-import type { Env, Role } from '../types'
+import type { AuthUser, Env, Role } from '../types'
 import { verifyJwt } from './crypto'
 
 export function corsHeaders(request: Request, env: Env) {
@@ -32,10 +32,13 @@ export function now() { return new Date().toISOString() }
 
 export class HttpError extends Error { constructor(message: string, public status = 400) { super(message) } }
 
-export async function requireAuth(request: Request, env: Env, roles: Role[] = ['admin', 'editor', 'viewer']) {
+export async function requireAuth(request: Request, env: Env, roles: Role[] = ['admin', 'manager', 'categorizer', 'viewer']) {
   const authorization = request.headers.get('Authorization') || ''
   const token = authorization.startsWith('Bearer ') ? authorization.slice(7) : ''
   const payload = token ? await verifyJwt(token, env.JWT_SECRET || 'change-this-secret-before-production') : null
   if (!payload || !roles.includes(payload.role as Role)) throw new HttpError('Sessão administrativa inválida ou expirada.', 401)
-  return payload
+  const admin = await env.DB.prepare('SELECT id, username, role, is_active FROM admins WHERE id = ?').bind(payload.sub).first<{ id: number; username: string; role: Role; is_active: number }>()
+  if (!admin || !admin.is_active || admin.role !== payload.role) throw new HttpError('Usuário administrativo inativo ou alterado.', 401)
+  const scopes = await env.DB.prepare('SELECT library_id, all_libraries FROM admin_library_access WHERE admin_id = ?').bind(admin.id).all<{ library_id: string | null; all_libraries: number }>()
+  return { id: admin.id, username: admin.username, role: admin.role, allLibraries: (scopes.results || []).some(scope => scope.all_libraries === 1), libraryIds: (scopes.results || []).map(scope => scope.library_id).filter((value): value is string => Boolean(value)) } satisfies AuthUser
 }

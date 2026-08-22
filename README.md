@@ -18,8 +18,8 @@ Cloudflare D1 (SQLite relacional)
 - `src/api.ts`: cliente HTTP, sessão JWT e normalização dos dados da API.
 - `src/storage.ts`: fallback local somente para demonstração/offline.
 - `worker/src/`: API Cloudflare Worker.
-- `worker/migrations/`: schema relacional versionado do D1 (`0001_initial.sql`, perfil em `0002_library_profile.sql`, referências externas em `0003_external_book_reference.sql` e limpeza do catálogo de demonstração em `0004_remove_demo_catalog.sql`).
-- `worker/seed.sql`: somente um administrador de bootstrap local; o catálogo público começa vazio.
+- `worker/migrations/`: schema relacional versionado do D1, incluindo perfis/escopos (`0005_access_control.sql`) e seções por biblioteca (`0006_library_sections.sql`).
+- `worker/seed.sql`: não cria usuário padrão; o catálogo e as credenciais começam vazios.
 
 ## Rodar o frontend localmente
 
@@ -31,11 +31,11 @@ npm --prefix worker install
 npm run dev:full
 ```
 
-Esse é o caminho recomendado para testar a aplicação completa. O comando aplica as migrations do D1 local, carrega apenas o administrador de bootstrap e sobe o Worker e o Vite juntos:
+Esse é o caminho recomendado para testar a aplicação completa. O comando aplica as migrations do D1 local e sobe o Worker e o Vite juntos:
 
 - Frontend: `http://localhost:5173`
 - API: `http://localhost:8787`
-- Admin local: `admin@livroperto.org` / `livroperto`
+- Admin local: crie um usuário com o procedimento abaixo usando `--local`.
 - Catálogo: vazio até você cadastrar bibliotecas e livros reais.
 
 Para parar os dois serviços, pressione `Ctrl+C` no terminal.
@@ -142,7 +142,21 @@ Crie um upload preset **unsigned** no Cloudinary e configure no Worker `CLOUDINA
 
 Depois, gere o frontend com `VITE_API_URL="https://seu-worker.workers.dev" npm run build`.
 
-O usuário de bootstrap local é `admin@livroperto.org` / `livroperto`. Troque a senha/hash antes de uma publicação real e não use essa credencial em produção.
+### Criar ou trocar o administrador
+
+O usuário demonstrativo `admin@livroperto.org` foi removido e não é recriado pelo seed. Depois de aplicar a migration no banco remoto, crie o primeiro administrador com senha digitada de forma interativa:
+
+```bash
+node worker/scripts/create-admin.mjs seu-email@exemplo.com
+```
+
+Para apenas testar localmente:
+
+```bash
+node worker/scripts/create-admin.mjs seu-email@exemplo.com --local
+```
+
+O script gera o hash PBKDF2 e executa o `wrangler d1 execute` no banco escolhido. Para trocar a senha, execute novamente com outro e-mail somente se for criar outro admin; para alterar a senha de um usuário existente, entre em **Administração → Usuários**, edite o usuário e informe a nova senha. Não coloque a senha, o hash ou `JWT_SECRET` no Git.
 
 ## Deploy no GitHub Pages
 
@@ -210,12 +224,12 @@ Essa busca é auxiliar: se estiver indisponível, o formulário continua aceitan
 ## Segurança
 
 - Queries D1 usam prepared statements.
-- Rotas administrativas verificam JWT e papel `admin`/`editor`.
+- Rotas administrativas verificam JWT, perfil e escopo de bibliotecas. Os perfis são `admin`, `manager`, `categorizer` e `viewer`.
 - Senhas são verificadas com PBKDF2-SHA-256; não ficam em texto puro.
 - CORS é configurável por origem.
 - Sugestões aceitam apenas campos necessários e têm limite de tamanho.
 - `localStorage` é somente fallback/cache de demonstração; o estado de produção fica no D1.
-- Em produção, configure `JWT_SECRET` e substitua o usuário seed.
+- Em produção, configure `JWT_SECRET` e crie o primeiro administrador pelo script de bootstrap.
 
 ## Validações executadas
 

@@ -1,4 +1,5 @@
 export type AvailabilityStatus = 'disponivel' | 'emprestado' | 'indisponivel'
+export type AdminRole = 'admin' | 'manager' | 'categorizer' | 'viewer'
 export type SuggestionStatus = 'pendente' | 'em_analise' | 'resolvida'
 export type SuggestionType = 'Sugerir livro' | 'Informar correção'
 
@@ -30,7 +31,10 @@ export interface Library {
   libraryType: 'escolar' | 'publica_comunitaria'
   latitude: number
   longitude: number
+  sections: LibrarySection[]
 }
+
+export interface LibrarySection { id: string; libraryId: string; name: string; description: string; sortOrder: number }
 
 export interface LibraryBook {
   id: string
@@ -40,8 +44,12 @@ export interface LibraryBook {
   availableQuantity: number
   status: AvailabilityStatus
   shelfLocation: string
+  sectionId?: string
+  sectionName?: string
   lastCheckedAt: string
 }
+
+export interface AdminUser { id: number; username: string; role: AdminRole; isActive: boolean; allLibraries: boolean; libraryIds: string[]; createdAt: string; lastLoginAt: string | null }
 
 export interface Suggestion {
   id: string

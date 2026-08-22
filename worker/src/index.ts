@@ -17,8 +17,8 @@ async function dispatch(request: Request, env: Env, url: URL): Promise<Response>
     const publicResponse = await publicRoute(request, env, url.pathname, url)
     if (publicResponse) return publicResponse
     if (url.pathname.startsWith('/api/admin/')) {
-      await requireAuth(request, env, ['admin', 'editor'])
-      const adminResponse = await adminRoute(request, env, url.pathname.slice('/api/admin'.length), url)
+      const actor = await requireAuth(request, env)
+      const adminResponse = await adminRoute(request, env, url.pathname.slice('/api/admin'.length), url, actor)
       if (adminResponse) return adminResponse
     }
     return json({ error: 'Rota não encontrada.' }, 404, request, env)
