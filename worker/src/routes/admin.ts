@@ -29,6 +29,7 @@ export async function adminRoute(request: Request, env: Env, subpath: string, ur
   if (subpath === '/books' && request.method === 'GET') return adminBooks(request, env, url, actor)
   if (subpath === '/books' && request.method === 'POST') { capability(actor, canWriteCatalog(actor)); return createBook(request, env) }
   if (subpath === '/books/import' && request.method === 'POST') { capability(actor, canWriteCatalog(actor)); return importBookReference(request, env) }
+  if (subpath === '/books/localize' && request.method === 'POST') { capability(actor, isAdmin(actor)); return localizeCatalog(request, env) }
   const bookMatch = subpath.match(/^\/books\/([^/]+)$/); if (bookMatch && request.method === 'PUT') { capability(actor, canWriteCatalog(actor)); await requireBookAccess(env, actor, bookMatch[1]); return updateBook(request, env, bookMatch[1]) } if (bookMatch && request.method === 'DELETE') { capability(actor, isAdmin(actor) || actor.role === 'manager'); await requireBookAccess(env, actor, bookMatch[1]); return deleteBook(request, env, bookMatch[1]) }
   const bookLibrariesMatch = subpath.match(/^\/books\/([^/]+)\/libraries$/); if (bookLibrariesMatch && request.method === 'POST') { capability(actor, canWriteCatalog(actor)); return createHolding(request, env, bookLibrariesMatch[1], actor) }
   if (subpath === '/libraries' && request.method === 'GET') return adminLibraries(request, env, actor)
@@ -58,6 +59,19 @@ async function updateBook(request: Request, env: Env, bookId: string) { const cu
 
 type ExternalBookReference = { title: string; authors: string[]; isbn: string; publicationYear: number | null; genre: string; subject: string; description?: string; coverUrl: string; externalSource: string; externalId: string }
 function openLibraryId(value: string) { const match = value.match(/OL\d+[WM]/i); return match ? match[0].toUpperCase() : '' }
+function portugueseTitle(title: string) {
+  const normalized = title.toLowerCase().replace(/[’']/g, "'").trim()
+  const known: Record<string, string> = {
+    "the psychopath test": 'O Teste do Psicopata',
+    "harry potter and the philosopher's stone": 'Harry Potter e a Pedra Filosofal',
+    "harry potter and the sorcerer's stone": 'Harry Potter e a Pedra Filosofal',
+    'harry potter and the chamber of secrets': 'Harry Potter e a Câmara Secreta',
+    'harry potter and the prisoner of azkaban': 'Harry Potter e o Prisioneiro de Azkaban',
+    'harry potter and the goblet of fire': 'Harry Potter e o Cálice de Fogo',
+    'harry potter and the deathly hallows': 'Harry Potter e as Relíquias da Morte',
+  }
+  return known[normalized] || title
+}
 function portugueseCategory(subjects: string[]) {
   const value = subjects.map(subject => subject.toLowerCase()).join(' | ')
   const categories: Array<[RegExp, string]> = [
@@ -102,7 +116,7 @@ async function externalFromDoc(doc: Record<string, unknown>): Promise<ExternalBo
   const localized = await portugueseEdition(workId)
   const subjects = Array.isArray(doc.subject) ? doc.subject.map(String) : []
   const isbn = localized?.isbn || firstText(doc.isbn)
-  return { title: localized?.title || text(doc.title, 180), authors: Array.isArray(doc.author_name) ? doc.author_name.slice(0, 4).map(String) : [], isbn, publicationYear: localized?.publicationYear || Number(doc.first_publish_year) || null, genre: portugueseCategory(subjects), subject: portugueseCategory(subjects), description: text(typeof doc.description === 'string' ? doc.description : '', 5000), coverUrl: localized?.coverUrl || (doc.cover_i ? `https://covers.openlibrary.org/b/id/${doc.cover_i}-L.jpg` : ''), externalSource: 'openlibrary', externalId: openLibraryId(rawKey) || isbn }
+  return { title: localized?.title || portugueseTitle(text(doc.title, 180)), authors: Array.isArray(doc.author_name) ? doc.author_name.slice(0, 4).map(String) : [], isbn, publicationYear: localized?.publicationYear || Number(doc.first_publish_year) || null, genre: portugueseCategory(subjects), subject: portugueseCategory(subjects), description: text(typeof doc.description === 'string' ? doc.description : '', 5000), coverUrl: localized?.coverUrl || (doc.cover_i ? `https://covers.openlibrary.org/b/id/${doc.cover_i}-L.jpg` : ''), externalSource: 'openlibrary', externalId: openLibraryId(rawKey) || isbn }
 }
 function mediaConfig(request: Request, env: Env) { const cloudName = text(env.CLOUDINARY_CLOUD_NAME, 100); const uploadPreset = text(env.CLOUDINARY_UPLOAD_PRESET, 100); return json({ enabled: Boolean(cloudName && uploadPreset), provider: 'cloudinary', cloudName, uploadPreset }, 200, request, env) }
 async function resolveBookReference(reference: string): Promise<ExternalBookReference | null> {
@@ -112,11 +126,12 @@ async function resolveBookReference(reference: string): Promise<ExternalBookRefe
     const record = await response.json<Record<string, unknown>>(); const rawAuthors = Array.isArray(record.authors) ? record.authors : []; const authors = (await Promise.all(rawAuthors.slice(0, 4).map(async author => { const key = typeof author === 'object' && author ? String((author as { author?: { key?: string } }).author?.key || '') : ''; if (!key) return ''; const authorResponse = await fetch(`https://openlibrary.org${key}.json`); if (!authorResponse.ok) return ''; const authorData = await authorResponse.json<{ name?: string }>(); return text(authorData.name, 180) }))).filter(Boolean)
     const workId = directId.endsWith('W') ? directId : workIdFrom(Array.isArray(record.works) ? (record.works[0] as { key?: string })?.key : '')
     const localized = await portugueseEdition(workId); const covers = Array.isArray(record.covers) ? record.covers : []; const subjects = Array.isArray(record.subjects) ? record.subjects.map(String) : []
-    return { title: localized?.title || text(record.title, 180), authors, isbn: localized?.isbn || firstText(record.isbn_13) || firstText(record.isbn_10), publicationYear: localized?.publicationYear || yearFrom(record.publish_date), genre: portugueseCategory(subjects), subject: portugueseCategory(subjects), coverUrl: localized?.coverUrl || (covers[0] ? `https://covers.openlibrary.org/b/id/${covers[0]}-L.jpg` : ''), externalSource: 'openlibrary', externalId: directId }
+    return { title: localized?.title || portugueseTitle(text(record.title, 180)), authors, isbn: localized?.isbn || firstText(record.isbn_13) || firstText(record.isbn_10), publicationYear: localized?.publicationYear || yearFrom(record.publish_date), genre: portugueseCategory(subjects), subject: portugueseCategory(subjects), coverUrl: localized?.coverUrl || (covers[0] ? `https://covers.openlibrary.org/b/id/${covers[0]}-L.jpg` : ''), externalSource: 'openlibrary', externalId: directId }
   }
   const query = /^\d[\d -]{8,}$/.test(reference) ? `isbn:${reference.replaceAll('-', ' ')}` : reference; const docs = await openLibrarySearch(query, 1, true); const fallback = docs.length ? docs : await openLibrarySearch(query, 1, false); return fallback[0] ? externalFromDoc(fallback[0]) : null
 }
 async function importBookReference(request: Request, env: Env) { const input = await body<{ reference?: string; selection?: ExternalBookReference }>(request); const reference = text(input.reference, 180); const resolved = input.selection?.title ? input.selection : reference.length >= 2 ? await resolveBookReference(reference) : null; if (!resolved?.title) throw new HttpError('Livro não encontrado na Open Library.', 404); const existing = await env.DB.prepare('SELECT * FROM books WHERE external_source = ? AND external_id = ? AND is_deleted = 0').bind(resolved.externalSource, resolved.externalId).first<DbBook>(); if (existing) return json(bookDto(existing), 200, request, env); const timestamp = now(); const bookId = id('book'); await env.DB.prepare('INSERT INTO books (id,title,authors_json,description,isbn,genre,subject,publication_year,cover_url,external_source,external_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)').bind(bookId, resolved.title, authorsJson(resolved.authors), resolved.description || '', resolved.isbn, resolved.genre, resolved.subject, resolved.publicationYear, resolved.coverUrl, resolved.externalSource, resolved.externalId, timestamp, timestamp).run(); const row = await env.DB.prepare('SELECT * FROM books WHERE id=?').bind(bookId).first<DbBook>(); return json(bookDto(row!), 201, request, env) }
+async function localizeCatalog(request: Request, env: Env) { const rows = await env.DB.prepare("SELECT * FROM books WHERE is_deleted=0 AND external_source='openlibrary' AND external_id <> '' ORDER BY updated_at DESC LIMIT 100").all<DbBook>(); const updates = await Promise.all((rows.results || []).map(async row => { const localized = await resolveBookReference(row.external_id); return localized?.title ? { row, localized } : null })); const statements = updates.filter(Boolean).map(item => { const value = item!; return env.DB.prepare('UPDATE books SET title=?,authors_json=?,isbn=?,genre=?,subject=?,publication_year=?,cover_url=?,updated_at=? WHERE id=?').bind(value.localized.title, authorsJson(value.localized.authors), value.localized.isbn || value.row.isbn, value.localized.genre, value.localized.subject, value.localized.publicationYear || value.row.publication_year, value.localized.coverUrl || value.row.cover_url, now(), value.row.id) }); if (statements.length) await env.DB.batch(statements); return json({ updated: statements.length, checked: rows.results?.length || 0 }, 200, request, env) }
 async function deleteBook(request: Request, env: Env, bookId: string) { await env.DB.prepare('UPDATE books SET is_deleted=1, updated_at=? WHERE id=?').bind(now(), bookId).run(); return json({ message: 'Livro removido do catálogo.' }, 200, request, env) }
 
 interface LibraryPayload { name?: string; address?: string; openingHours?: string; phone?: string; email?: string; description?: string; imageUrl?: string; libraryType?: string; latitude?: number | string | null; longitude?: number | string | null }
