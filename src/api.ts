@@ -53,14 +53,15 @@ export async function deleteLibrary(id: string) { const response = await request
 export async function listSuggestions(status = '') { const response = await request<{ data: Array<Record<string, unknown>> }>(`/api/admin/suggestions${status ? `?status=${encodeURIComponent(status)}` : ''}`); return (response.data || []).map(toSuggestion) }
 export async function updateSuggestion(id: string, status: SuggestionStatus) { return request(`/api/admin/suggestions/${id}`, { method: 'PUT', body: JSON.stringify({ status }) }) }
 const externalSearches = new Map<string, Promise<{ data: ExternalBookResult[] }>>()
-export async function externalBooks(query: string) {
+export type BookSearchProvider = 'auto' | 'openlibrary' | 'bigbook'
+export async function externalBooks(query: string, provider: BookSearchProvider = 'auto') {
   const normalized = query.trim().replace(/\s+/g, ' ').toLowerCase()
-  const key = `external:${normalized}`
+  const key = `external:v2:${provider}:${normalized}`
   const cached = readCache<{ data: ExternalBookResult[] }>(key)
   if (cached) return cached
   const pending = externalSearches.get(key)
   if (pending) return pending
-  const search = request<{ data: ExternalBookResult[] }>(`/api/admin/external-books?query=${encodeURIComponent(query.trim())}`)
+  const search = request<{ data: ExternalBookResult[] }>(`/api/admin/external-books?provider=${provider}&query=${encodeURIComponent(query.trim())}`)
     .then(result => writeCache(key, result, result.data.length ? 300_000 : 15_000))
     .finally(() => externalSearches.delete(key))
   externalSearches.set(key, search)

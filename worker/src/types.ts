@@ -5,6 +5,7 @@ export interface Env {
   JWT_SECRET?: string
   JWT_TTL_DAYS?: string
   GOOGLE_BOOKS_API_KEY?: string
+  BIG_BOOK_API_KEY?: string
   CLOUDINARY_CLOUD_NAME?: string
   CLOUDINARY_UPLOAD_PRESET?: string
 }

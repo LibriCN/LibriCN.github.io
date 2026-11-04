@@ -29,6 +29,17 @@ async function client(fetch) {
 const json = (value, status = 200) => new Response(JSON.stringify(value), { status, headers: { 'Content-Type': 'application/json' } })
 const result = { source: 'Open Library', externalSource: 'openlibrary', externalId: 'OL123M', title: 'Livro escolhido', authors: ['Autora'], isbn: '9780000000000', publicationYear: 2024, genre: 'Ficção', subject: 'Ficção', description: '', coverUrl: '' }
 
+test('provider choice is sent to the Worker and isolates the search cache', async () => {
+  const requests = []
+  const api = await client(async url => { requests.push(url); return json({ data: [result] }) })
+  await api.externalBooks('Livro', 'openlibrary')
+  await api.externalBooks('Livro', 'bigbook')
+  await api.externalBooks('Livro', 'openlibrary')
+  assert.equal(requests.length, 2)
+  assert.equal(new URL(requests[0]).searchParams.get('provider'), 'openlibrary')
+  assert.equal(new URL(requests[1]).searchParams.get('provider'), 'bigbook')
+})
+
 test('repeated and concurrent external searches reuse one request', async () => {
   let calls = 0; let release
   const pending = new Promise(resolve => { release = resolve })

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { ArrowRight, BookOpen, CircleAlert, LoaderCircle, Search, X } from 'lucide-react'
 import { apiConfigured, externalBooks } from '../api'
-import type { ExternalBookResult } from '../api'
+import type { BookSearchProvider, ExternalBookResult } from '../api'
 import type { Book } from '../types'
 
 export function BookThumbnail({ book }: { book: { title: string; coverUrl: string } }) {
@@ -12,8 +12,8 @@ export function BookThumbnail({ book }: { book: { title: string; coverUrl: strin
     : <span className="admin-book-cover admin-cover-empty" aria-label="Capa indisponível"><BookOpen size={22} /></span>
 }
 
-export function BookIdentity({ book }: { book: Pick<Book, 'title' | 'authors' | 'coverUrl' | 'isbn'> & { publicationYear: number | null; recordType?: 'work' | 'edition'; externalId?: string } }) {
-  return <><BookThumbnail book={book} /><span className="book-identity"><strong>{book.title}</strong><span>{book.authors.join(', ') || 'Autor não informado'}</span><small>{book.publicationYear || 'Ano não informado'} <span aria-hidden="true">·</span> {book.isbn ? `ISBN ${book.isbn}` : 'ISBN não informado'}</small>{book.recordType && <small className="record-identity">{book.recordType === 'work' ? 'Obra · edição não confirmada' : 'Edição identificada'}{book.externalId && ` · ${book.externalId}`}</small>}</span></>
+export function BookIdentity({ book }: { book: Pick<Book, 'title' | 'authors' | 'coverUrl' | 'isbn'> & { publicationYear: number | null; recordType?: 'work' | 'edition'; externalId?: string; source?: string } }) {
+  return <><BookThumbnail book={book} /><span className="book-identity"><strong>{book.title}</strong>{book.source && <small>{book.source}</small>}<span>{book.authors.join(', ') || 'Autor não informado'}</span><small>{book.publicationYear || 'Ano não informado'} <span aria-hidden="true">·</span> {book.isbn ? `ISBN ${book.isbn}` : 'ISBN não informado'}</small>{book.recordType && <small className="record-identity">{book.recordType === 'work' ? 'Obra · edição não confirmada' : 'Edição identificada'}{book.externalId && ` · ${book.externalId}`}</small>}</span></>
 }
 
 export function BookSearch({ books, onSelect, onManual, disabled = false }: {
@@ -23,6 +23,7 @@ export function BookSearch({ books, onSelect, onManual, disabled = false }: {
   disabled?: boolean
 }) {
   const [query, setQuery] = useState('')
+  const [provider, setProvider] = useState<BookSearchProvider>('auto')
   const [results, setResults] = useState<ExternalBookResult[]>([])
   const [busy, setBusy] = useState(false)
   const [searched, setSearched] = useState('')
@@ -38,7 +39,7 @@ export function BookSearch({ books, onSelect, onManual, disabled = false }: {
     setBusy(true); setError(''); setResults([]); setSearched('')
     try {
       if (!apiConfigured) throw new Error('A busca externa precisa de uma API conectada. Você pode cadastrar manualmente.')
-      const response = await externalBooks(query)
+      const response = await externalBooks(query, provider)
       if (current === generation.current) { setResults(response.data); setSearched(query.trim()) }
     } catch (cause) { if (current === generation.current) setError(cause instanceof Error ? cause.message : 'Não foi possível buscar. Tente novamente.') }
     finally { if (current === generation.current) setBusy(false) }
@@ -47,6 +48,7 @@ export function BookSearch({ books, onSelect, onManual, disabled = false }: {
   return <div className="book-finder">
     <div className="finder-tabs" role="group" aria-label="Onde buscar"><button type="button" className={source === 'external' ? 'active' : ''} onClick={() => setSource('external')}>Buscar livro</button><button type="button" className={source === 'catalog' ? 'active' : ''} onClick={() => setSource('catalog')}>Já está no acervo <span>{books.length}</span></button></div>
     <form className="finder-form" onSubmit={event => void runSearch(event)}>
+      {source === 'external' && <label className="finder-provider" htmlFor="book-search-provider">Base de pesquisa<select id="book-search-provider" value={provider} disabled={disabled} onChange={event => { generation.current++; setProvider(event.target.value as BookSearchProvider); setResults([]); setSearched(''); setError(''); setBusy(false) }}><option value="auto">Automática · Open Library + Big Book</option><option value="openlibrary">Open Library</option><option value="bigbook">Big Book</option></select></label>}
       <label htmlFor="book-finder-query">{source === 'catalog' ? 'Buscar entre os livros cadastrados' : 'Título, autor, ISBN ou ID da Open Library'}</label>
       <div className="finder-input"><Search size={20} /><input id="book-finder-query" value={query} onChange={event => changeQuery(event.target.value)} placeholder="Qual livro você tem em mãos?" enterKeyHint="search" autoComplete="off" disabled={disabled} />{query && <button className="icon-button" type="button" aria-label="Limpar busca" onClick={() => changeQuery('')}><X size={17} /></button>}{source === 'external' && <button className="button button-primary" disabled={busy || disabled || !query.trim()}>{busy ? <LoaderCircle size={18} className="spin" /> : <Search size={18} />}<span>{busy ? 'Buscando' : 'Buscar'}</span></button>}</div>
     </form>

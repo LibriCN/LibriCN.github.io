@@ -82,6 +82,10 @@ Após qualquer alteração administrativa em livros, exemplares ou bibliotecas, 
 
 ### Interface e coleta no celular
 
+Na busca externa, **Base de pesquisa** permite escolher **Automática**, **Open Library** ou **Big Book**. A Open Library funciona sem chave. A Big Book exige o secret `BIG_BOOK_API_KEY` no Worker (Cloudflare → Worker `livro-perto-api` → Settings → Variables and Secrets → Add → Secret). A chave deve ser obtida na conta do serviço; não a coloque em variáveis `VITE_` ou no Git. Para desenvolvimento local, use `worker/.dev.vars`. [Autenticação e busca Big Book](https://bigbookapi.com/docs/).
+
+O Worker aceita `GET /api/admin/external-books?query=...&provider=auto|openlibrary|bigbook`. Em modo automático, usa as bases configuradas como alternativa quando a primeira falha ou não encontra resultados. Uma consulta válida sem resultados retorna uma lista vazia; indisponibilidade de todas as bases retorna erro, sem guardar a falha no cache.
+
 A interface mantém a paleta escura com destaques vermelhos. O painel tem navegação inferior no celular, formulários em tela cheia e cartões de livros com capa, título, autores, ano e ISBN. Capas ausentes usam um marcador neutro.
 
 Em **Livros → Adicionar livro**, a busca mostra opções para conferir antes da importação. Em **Coleta rápida**, escolher o resultado não faz uma nova requisição: os dados são confirmados na tela e **Salvar e próximo** envia livro e exemplar juntos. A biblioteca, a seção e a prateleira são mantidas na sessão, e o foco volta à busca após salvar. A aba **Já está no acervo** reutiliza os livros carregados, sem consultar a base externa.

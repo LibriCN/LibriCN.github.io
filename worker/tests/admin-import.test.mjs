@@ -90,3 +90,95 @@ test('ISBN resolution follows the exact Open Library edition', async () => {
     assert.equal(urls.some(url => url.includes('/works/')), false)
   } finally { globalThis.fetch = originalFetch }
 })
+
+test('Big Book uses the API key header and normalizes nested books', async () => {
+  const originalFetch = globalThis.fetch
+  let seenHeaders
+  globalThis.fetch = async (url, options = {}) => {
+    assert.match(String(url), /api\.bigbookapi\.com\/search-books/)
+    assert.match(String(url), /[?&]query=big-book-nested\b/)
+    assert.match(String(url), /group-results=false/)
+    seenHeaders = options.headers
+    return new Response(JSON.stringify({ books: [[{ id: 'bb-1', title: 'Livro Big', image: 'https://img.test/book.jpg', authors: [{ name: 'Autora Big' }], publish_year: 2024, isbn13: '9780000000001' }]] }), { status: 200 })
+  }
+  try {
+    const result = await admin.bigBookSearch('big-book-nested', 'secret-key', 10)
+    assert.equal(seenHeaders.get('x-api-key'), 'secret-key')
+    assert.equal(result[0].externalSource, 'bigbook')
+    assert.equal(result[0].externalId, 'bigbook:bb-1')
+    assert.deepEqual(result[0].authors, ['Autora Big'])
+    assert.equal(result[0].publicationYear, 2024)
+  } finally { globalThis.fetch = originalFetch }
+})
+
+test('external route falls back to Big Book after Open Library failure and supports provider selection', async () => {
+  const originalFetch = globalThis.fetch
+  const calls = []
+  globalThis.fetch = async (url) => {
+    calls.push(String(url))
+    if (String(url).includes('bigbookapi.com')) return new Response(JSON.stringify({ books: [{ id: 'bb-fallback', title: 'Resultado Big Book', authors: [{ name: 'Autor' }], isbn13: '9780000000002' }] }), { status: 200 })
+    return new Response('', { status: 503 })
+  }
+  try {
+    const request = new Request('https://example.test/api/admin/external-books?query=fallback-unique&provider=auto')
+    const actor = { id: 1, username: 'admin@example.test', role: 'admin', allLibraries: true, libraryIds: [] }
+    const response = await admin.adminRoute(request, { BIG_BOOK_API_KEY: 'fallback-key' }, '/external-books', new URL(request.url), actor)
+    assert.equal(response.status, 200)
+    assert.equal((await response.json()).data[0].externalSource, 'bigbook')
+    assert.ok(calls.some(url => url.includes('openlibrary.org/search.json')))
+    assert.ok(calls.some(url => url.includes('bigbookapi.com/search-books')))
+  } finally { globalThis.fetch = originalFetch }
+})
+
+test('empty provider result stays 200, while provider failure is 503', async () => {
+  const originalFetch = globalThis.fetch
+  const actor = { id: 1, username: 'admin@example.test', role: 'admin', allLibraries: true, libraryIds: [] }
+  try {
+    globalThis.fetch = async () => new Response(JSON.stringify({ docs: [] }), { status: 200 })
+    const emptyRequest = new Request('https://example.test/api/admin/external-books?query=empty-unique&provider=openlibrary')
+    const emptyResponse = await admin.adminRoute(emptyRequest, {}, '/external-books', new URL(emptyRequest.url), actor)
+    assert.equal(emptyResponse.status, 200)
+    assert.deepEqual((await emptyResponse.json()).data, [])
+
+    globalThis.fetch = async () => new Response('', { status: 503 })
+    const failedRequest = new Request('https://example.test/api/admin/external-books?query=failed-unique&provider=openlibrary')
+    const failedResponse = await admin.adminRoute(failedRequest, {}, '/external-books', new URL(failedRequest.url), actor).catch(error => error)
+    assert.equal(failedResponse.status, 503)
+  } finally { globalThis.fetch = originalFetch }
+})
+
+test('search retries Open Library with lightweight fields and keeps provider failures distinct', async () => {
+  const originalFetch = globalThis.fetch
+  const actor = { id: 1, username: 'admin@example.test', role: 'admin', allLibraries: true, libraryIds: [] }
+  try {
+    const requests = []
+    globalThis.fetch = async url => {
+      const value = String(url); requests.push(value)
+      if (value.includes('editions')) return new Response('', { status: 503 })
+      return new Response(JSON.stringify({ docs: [{ key: '/works/OL777W', title: 'Fallback leve', author_name: ['Autor'] }] }), { status: 200 })
+    }
+    const request = new Request('https://example.test/api/admin/external-books?query=light-fallback-unique')
+    const response = await admin.adminRoute(request, {}, '/external-books', new URL(request.url), actor)
+    assert.equal(response.status, 200)
+    assert.equal((await response.json()).data[0].title, 'Fallback leve')
+    assert.equal(requests.length, 2)
+    assert.match(requests[1], /fields=key,title,author_name,first_publish_year,cover_i/)
+
+    globalThis.fetch = async () => new Response('', { status: 503 })
+    const googleRequest = new Request('https://example.test/api/admin/external-books?query=ol-only-failure-unique&provider=openlibrary')
+    const failure = await admin.adminRoute(googleRequest, { GOOGLE_BOOKS_API_KEY: 'google-key' }, '/external-books', new URL(googleRequest.url), actor).catch(error => error)
+    assert.equal(failure.status, 503)
+  } finally { globalThis.fetch = originalFetch }
+})
+
+test('a valid empty Big Book response is not reported as a 503', async () => {
+  const originalFetch = globalThis.fetch
+  const actor = { id: 1, username: 'admin@example.test', role: 'admin', allLibraries: true, libraryIds: [] }
+  globalThis.fetch = async url => String(url).includes('bigbookapi.com') ? new Response(JSON.stringify({ books: [] }), { status: 200 }) : new Response('', { status: 503 })
+  try {
+    const request = new Request('https://example.test/api/admin/external-books?query=bigbook-empty-unique&provider=auto')
+    const response = await admin.adminRoute(request, { BIG_BOOK_API_KEY: 'key' }, '/external-books', new URL(request.url), actor)
+    assert.equal(response.status, 200)
+    assert.deepEqual((await response.json()).data, [])
+  } finally { globalThis.fetch = originalFetch }
+})

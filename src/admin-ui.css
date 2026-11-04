@@ -76,6 +76,8 @@ input, select, textarea { accent-color: var(--red-light); }
 .finder-tabs button.active { color: #ff8288; border-color: var(--red-light); }
 .finder-tabs button > span { padding: 1px 6px; background: #333; border-radius: 5px; font-size: 10px; }
 .finder-form > label { display: block; margin-bottom: 8px; font-size: 13px; color: #c9c9c9; }
+.finder-form .finder-provider { margin-bottom: 18px; }
+.finder-provider select { display: block; width: 100%; margin-top: 7px; padding: 10px; border: 1px solid #404040; background: #141414; font-size: 14px; }
 .finder-input { display: flex; align-items: center; gap: 10px; padding: 6px 7px 6px 14px; border: 1px solid #464646; border-radius: 10px; background: #141414; }
 .finder-input:focus-within { border-color: #d64750; box-shadow: 0 0 0 3px #b3121c18; }
 .finder-input > svg { color: #d76d74; flex: none; }

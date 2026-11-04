@@ -64,11 +64,14 @@ const externalSearchInflight = new Map<string, Promise<Array<Record<string, unkn
 const EXTERNAL_CACHE_TTL = 60_000
 const EXTERNAL_CACHE_MAX = 100
 
-export async function fetchJson<T>(url: string, timeoutMs = 4_000): Promise<T | null> {
+export async function fetchJson<T>(url: string, timeoutMs = 10_000, init?: RequestInit): Promise<T | null> {
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), timeoutMs)
   try {
-    const response = await fetch(url, { signal: controller.signal })
+    const headers = new Headers(init?.headers)
+    if (!headers.has('Accept')) headers.set('Accept', 'application/json')
+    if (!headers.has('User-Agent')) headers.set('User-Agent', 'Livro-Perto/1.0 (https://libricn.github.io)')
+    const response = await fetch(url, { ...init, headers, signal: controller.signal })
     if (!response.ok) return null
     return await response.json<T>()
   } catch { return null } finally { clearTimeout(timeout) }
@@ -106,6 +109,7 @@ function portugueseCategory(subjects: string[]) {
 function firstText(value: unknown) { return Array.isArray(value) ? String(value[0] || '') : String(value || '') }
 function yearFrom(value: unknown) { return Number(String(value || '').match(/\d{4}/)?.[0] || 0) || null }
 function workIdFrom(value: unknown) { const match = String(value || '').match(/OL\d+W/i); return match ? match[0].toUpperCase() : '' }
+function normalizedIsbn(value: unknown) { return String(value || '').replaceAll('-', '').replaceAll(' ', '').trim() }
 async function portugueseEdition(workId: string) {
   if (!workId) return null
   try {
@@ -135,6 +139,18 @@ export async function openLibrarySearch(query: string, limit: number, portuguese
   externalSearchInflight.set(cacheKey, promise)
   try { return await promise } finally { externalSearchInflight.delete(cacheKey) }
 }
+async function openLibrarySearchLight(query: string, limit: number, portuguese = true) {
+  const cacheKey = `light:${portuguese ? 'pt' : 'all'}:${query.trim().toLowerCase()}:${limit}`
+  const cached = externalSearchCache.get(cacheKey)
+  if (cached && cached.expiresAt > Date.now()) return cached.value
+  const language = portuguese ? '&lang=pt' : ''
+  const data = await fetchJson<{ docs?: Array<Record<string, unknown>> }>(`https://openlibrary.org/search.json?q=${encodeURIComponent(query)}${language}&limit=${limit}&fields=key,title,author_name,first_publish_year,cover_i`, 10_000)
+  if (!data) throw new HttpError('A busca externa está indisponível no momento.', 503)
+  const value = data.docs || []
+  if (externalSearchCache.size >= EXTERNAL_CACHE_MAX) externalSearchCache.delete(externalSearchCache.keys().next().value as string)
+  externalSearchCache.set(cacheKey, { expiresAt: Date.now() + EXTERNAL_CACHE_TTL, value })
+  return value
+}
 export function externalFromDoc(doc: Record<string, unknown>): ExternalBookReference & Record<string, unknown> {
   const rawKey = String(doc.key || '')
   const subjects = Array.isArray(doc.subject) ? doc.subject.map(String) : []
@@ -146,7 +162,40 @@ export function externalFromDoc(doc: Record<string, unknown>): ExternalBookRefer
   const title = edition ? text(edition.title || doc.title, 180) : text(doc.title, 180)
   const publicationYear = edition ? yearFrom(edition.publish_date || edition.first_publish_year) : Number(doc.first_publish_year) || null
   const coverId = edition?.cover_i || doc.cover_i
-  return { title, authors: Array.isArray(doc.author_name) ? doc.author_name.slice(0, 4).map(String) : [], isbn, publicationYear, genre: portugueseCategory(subjects), subject: portugueseCategory(subjects), description: text(typeof doc.description === 'string' ? doc.description : '', 5000), coverUrl: coverId ? `https://covers.openlibrary.org/b/id/${coverId}-L.jpg` : '', externalSource: 'openlibrary', externalId: editionKey || workId, editionKey, editionCount: Number(doc.edition_count) || 0, workId, recordType: editionKey ? 'edition' : 'work' }
+  return { title, authors: Array.isArray(doc.author_name) ? doc.author_name.slice(0, 4).map(String) : [], isbn, publicationYear, genre: portugueseCategory(subjects), subject: portugueseCategory(subjects), description: text(typeof doc.description === 'string' ? doc.description : '', 5000), coverUrl: coverId ? `https://covers.openlibrary.org/b/id/${coverId}-L.jpg` : '', externalSource: 'openlibrary', externalId: editionKey || workId, source: 'Open Library', editionKey, editionCount: Number(doc.edition_count) || 0, workId, recordType: editionKey ? 'edition' : 'work' }
+}
+function flattenBooks(value: unknown): Array<Record<string, unknown>> {
+  if (!Array.isArray(value)) return typeof value === 'object' && value ? [value as Record<string, unknown>] : []
+  return value.flatMap(flattenBooks).filter(Boolean)
+}
+export function externalFromBigBook(book: Record<string, unknown>): ExternalBookReference & Record<string, unknown> {
+  const authors = Array.isArray(book.authors) ? book.authors.map(author => typeof author === 'object' && author ? String((author as { name?: unknown }).name || '') : String(author || '')).filter(Boolean).slice(0, 4) : []
+  const subjects = Array.isArray(book.subjects) ? book.subjects.map(String) : Array.isArray(book.categories) ? book.categories.map(String) : []
+  const isbn = normalizedIsbn(book.isbn13 || book.isbn_13 || book.isbn)
+  const title = text(book.title, 180)
+  const idValue = text(book.id || isbn || title, 180)
+  return { title, authors, isbn, publicationYear: yearFrom(book.publish_year || book.publication_year || book.published), genre: portugueseCategory(subjects), subject: portugueseCategory(subjects), description: text(book.description || book.summary, 5000), coverUrl: text(book.image || book.cover_url || book.cover, 500), externalSource: 'bigbook', externalId: idValue ? `bigbook:${idValue}` : '', source: 'Big Book', recordType: 'edition' }
+}
+export async function bigBookSearch(query: string, apiKey: string, limit = 10) {
+  const cacheKey = `bigbook:${query.trim().toLowerCase()}:${limit}`
+  const cached = externalSearchCache.get(cacheKey)
+  if (cached && cached.expiresAt > Date.now()) return cached.value
+  const pending = externalSearchInflight.get(cacheKey)
+  if (pending) return pending
+  const isbn = normalizedIsbn(query)
+  const params = new URLSearchParams({ 'group-results': 'false', number: String(Math.min(20, Math.max(1, limit))), offset: '0' })
+  const isIsbn13 = /^\d{13}$/.test(isbn)
+  params.set(isIsbn13 ? 'isbn' : 'query', isIsbn13 ? isbn : query)
+  const promise = (async () => {
+    const data = await fetchJson<{ books?: unknown }>(`https://api.bigbookapi.com/search-books?${params.toString()}`, 10_000, { headers: { 'x-api-key': apiKey, Accept: 'application/json', 'User-Agent': 'Livro-Perto/1.0' } })
+    if (!data) throw new HttpError('Big Book está indisponível no momento.', 503)
+    const value = flattenBooks(data.books).map(externalFromBigBook).filter(item => item.title).slice(0, limit)
+    if (externalSearchCache.size >= EXTERNAL_CACHE_MAX) externalSearchCache.delete(externalSearchCache.keys().next().value as string)
+    externalSearchCache.set(cacheKey, { expiresAt: Date.now() + EXTERNAL_CACHE_TTL, value })
+    return value
+  })()
+  externalSearchInflight.set(cacheKey, promise)
+  try { return await promise } finally { externalSearchInflight.delete(cacheKey) }
 }
 function mediaConfig(request: Request, env: Env) { const cloudName = text(env.CLOUDINARY_CLOUD_NAME, 100); const uploadPreset = text(env.CLOUDINARY_UPLOAD_PRESET, 100); return json({ enabled: Boolean(cloudName && uploadPreset), provider: 'cloudinary', cloudName, uploadPreset }, 200, request, env) }
 export async function resolveBookReference(reference: string, preloadedRecord?: Record<string, unknown>): Promise<ExternalBookReference | null> {
@@ -256,22 +305,37 @@ function corsHeadersForCsv(request: Request, env: Env) { const origin = request.
 async function externalBooks(request: Request, env: Env, url: URL) {
   const query = text(url.searchParams.get('query') || url.searchParams.get('q'), 180)
   if (query.length < 2) throw new HttpError('Informe pelo menos 2 caracteres para buscar.')
+  const provider = String(url.searchParams.get('provider') || 'auto').toLowerCase()
+  if (!['auto', 'openlibrary', 'bigbook'].includes(provider)) throw new HttpError('Provedor de busca inválido.')
   const directId = openLibraryId(query)
-  const normalizedIsbn = query.replaceAll('-', '').replaceAll(' ', '')
-  const directIsbn = /^(?:\d{9}[\dXx]|\d{13})$/.test(normalizedIsbn)
-  if (directId || directIsbn) { const resolved = await resolveBookReference(directId || normalizedIsbn); return json({ data: resolved ? [{ ...resolved, source: 'Open Library' }] : [] }, 200, request, env) }
+  const isbn = normalizedIsbn(query)
+  const directIsbn = /^(?:\d{9}[\dXx]|\d{13})$/.test(isbn)
+  if (directId && provider !== 'bigbook') { const resolved = await resolveBookReference(directId); return json({ data: resolved ? [{ ...resolved, source: 'Open Library' }] : [] }, 200, request, env) }
+  if (directIsbn && provider === 'openlibrary') { const resolved = await resolveBookReference(isbn); return json({ data: resolved ? [{ ...resolved, source: 'Open Library' }] : [] }, 200, request, env) }
+  if (directIsbn && provider === 'auto') {
+    try { const resolved = await resolveBookReference(isbn); if (resolved) return json({ data: [{ ...resolved, source: 'Open Library' }] }, 200, request, env) } catch { /* fall through to alternate providers */ }
+  }
   let docs: Array<Record<string, unknown>> = []
-  let openLibraryUnavailable = false
-  try {
+  let providerResponded = false
+  if (provider !== 'bigbook') try {
     docs = await openLibrarySearch(query, 10, true)
     if (!docs.length) docs = await openLibrarySearch(query, 10, false)
-  } catch { openLibraryUnavailable = true }
-  let results: Array<Record<string, unknown>> = docs.map(externalFromDoc).filter(item => item.title)
-  let googleUnavailable = false
-  if (!results.length && env.GOOGLE_BOOKS_API_KEY) {
-    const data = await fetchJson<{ items?: Array<{ id?: string; volumeInfo?: Record<string, unknown> }> }>(`https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(query)}&maxResults=10&key=${env.GOOGLE_BOOKS_API_KEY}`)
-    if (data) { results = (data.items || []).map(item => { const info = item.volumeInfo || {}; const subjects = Array.isArray(info.categories) ? info.categories.map(String) : []; return { source: 'Google Books', externalSource: 'googlebooks', externalId: String(item.id || ''), title: text(info.title, 180), authors: Array.isArray(info.authors) ? info.authors.slice(0, 4).map(String) : [], isbn: '', publicationYear: yearFrom(info.publishedDate), genre: portugueseCategory(subjects), subject: portugueseCategory(subjects), description: text(info.description, 5000), coverUrl: typeof info.imageLinks === 'object' && info.imageLinks ? String((info.imageLinks as { thumbnail?: string }).thumbnail || '') : '' } }).filter(item => item.title) } else googleUnavailable = true
+    providerResponded = true
+  } catch {
+    try { docs = await openLibrarySearchLight(query, 10, true); providerResponded = true } catch { /* try alternate providers */ }
   }
-  if (!results.length && (openLibraryUnavailable || googleUnavailable) && (!env.GOOGLE_BOOKS_API_KEY || googleUnavailable)) throw new HttpError('As bases externas estão indisponíveis no momento.', 503)
+  let results: Array<Record<string, unknown>> = docs.map(externalFromDoc).filter(item => item.title)
+  if (!results.length && provider !== 'openlibrary') {
+    if (env.BIG_BOOK_API_KEY) {
+      try { results = await bigBookSearch(query, env.BIG_BOOK_API_KEY, 10); providerResponded = true } catch { /* try Google or report unavailable */ }
+    } else if (provider === 'bigbook') {
+      throw new HttpError('A chave da Big Book não está configurada.', 503)
+    }
+  }
+  if (!results.length && provider === 'auto' && env.GOOGLE_BOOKS_API_KEY) {
+    const data = await fetchJson<{ items?: Array<{ id?: string; volumeInfo?: Record<string, unknown> }> }>(`https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(query)}&maxResults=10&key=${env.GOOGLE_BOOKS_API_KEY}`)
+    if (data) { providerResponded = true; results = (data.items || []).map(item => { const info = item.volumeInfo || {}; const subjects = Array.isArray(info.categories) ? info.categories.map(String) : []; return { source: 'Google Books', externalSource: 'googlebooks', externalId: String(item.id || ''), title: text(info.title, 180), authors: Array.isArray(info.authors) ? info.authors.slice(0, 4).map(String) : [], isbn: '', publicationYear: yearFrom(info.publishedDate), genre: portugueseCategory(subjects), subject: portugueseCategory(subjects), description: text(info.description, 5000), coverUrl: typeof info.imageLinks === 'object' && info.imageLinks ? String((info.imageLinks as { thumbnail?: string }).thumbnail || '') : '' } }).filter(item => item.title) }
+  }
+  if (!results.length && !providerResponded) throw new HttpError('As bases externas estão indisponíveis no momento.', 503)
   return json({ data: results }, 200, request, env)
 }

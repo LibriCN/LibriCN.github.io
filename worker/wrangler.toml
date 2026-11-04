@@ -11,6 +11,8 @@ local_protocol = "http"
 CORS_ORIGIN = "https://libricn.github.io"
 CITY_NAME = "Currais Novos RN"
 JWT_TTL_DAYS = "7"
+# Opcional: configure como secret, nunca como variável VITE_:
+# npx wrangler secret put BIG_BOOK_API_KEY
 # Opcional, para upload sem assinatura no painel:
 # CLOUDINARY_CLOUD_NAME = "..."
 # CLOUDINARY_UPLOAD_PRESET = "..."
