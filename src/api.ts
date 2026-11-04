@@ -1,6 +1,7 @@
 import type { AdminRole, AdminUser, Book, Library, LibraryBook, LibrarySection, Suggestion, SuggestionStatus } from './types'
 import { appConfig } from './config'
 import { invalidateCache, readCache, writeCache } from './cache'
+import { searchOpenLibrary } from './openLibrary'
 
 const TOKEN_KEY = 'livro-perto-token'
 const USER_KEY = 'livro-perto-user'
@@ -56,12 +57,22 @@ const externalSearches = new Map<string, Promise<{ data: ExternalBookResult[] }>
 export type BookSearchProvider = 'auto' | 'openlibrary' | 'bigbook'
 export async function externalBooks(query: string, provider: BookSearchProvider = 'auto') {
   const normalized = query.trim().replace(/\s+/g, ' ').toLowerCase()
-  const key = `external:v2:${provider}:${normalized}`
+  const key = `external:v3:${provider}:${normalized}`
   const cached = readCache<{ data: ExternalBookResult[] }>(key)
   if (cached) return cached
   const pending = externalSearches.get(key)
   if (pending) return pending
-  const search = request<{ data: ExternalBookResult[] }>(`/api/admin/external-books?provider=${provider}&query=${encodeURIComponent(query.trim())}`)
+  const search = (async () => {
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 8_000)
+    try {
+      return await request<{ data: ExternalBookResult[] }>(`/api/admin/external-books?provider=${provider}&query=${encodeURIComponent(query.trim())}`, { signal: controller.signal })
+    } catch (cause) {
+      if (provider === 'bigbook' || !(cause instanceof ApiError) || ![0, 500, 502, 503, 504].includes(cause.status)) throw cause
+      try { return await searchOpenLibrary(query) }
+      catch { throw new ApiError('Não foi possível consultar a Open Library pelo servidor nem pelo navegador. Tente novamente em instantes ou escolha outra base.', 503) }
+    } finally { clearTimeout(timeout) }
+  })()
     .then(result => writeCache(key, result, result.data.length ? 300_000 : 15_000))
     .finally(() => externalSearches.delete(key))
   externalSearches.set(key, search)

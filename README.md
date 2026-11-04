@@ -86,6 +86,8 @@ Na busca externa, **Base de pesquisa** permite escolher **Automática**, **Open 
 
 O Worker aceita `GET /api/admin/external-books?query=...&provider=auto|openlibrary|bigbook`. Em modo automático, usa as bases configuradas como alternativa quando a primeira falha ou não encontra resultados. Uma consulta válida sem resultados retorna uma lista vazia; indisponibilidade de todas as bases retorna erro, sem guardar a falha no cache.
 
+Se a passagem pelo Worker falhar por conexão, timeout ou HTTP 500/502/503/504, o frontend tenta consultar a Open Library diretamente com CORS, sem enviar token, cookies ou chave do aplicativo. O limite da tentativa no Worker é de oito segundos; as consultas diretas têm limite de dez segundos por chamada. Erros de autenticação/permissão e a seleção explícita da Big Book não acionam esse fallback. O cadastro continua sendo salvo exclusivamente pela API autenticada.
+
 A interface mantém a paleta escura com destaques vermelhos. O painel tem navegação inferior no celular, formulários em tela cheia e cartões de livros com capa, título, autores, ano e ISBN. Capas ausentes usam um marcador neutro.
 
 Em **Livros → Adicionar livro**, a busca mostra opções para conferir antes da importação. Em **Coleta rápida**, escolher o resultado não faz uma nova requisição: os dados são confirmados na tela e **Salvar e próximo** envia livro e exemplar juntos. A biblioteca, a seção e a prateleira são mantidas na sessão, e o foco volta à busca após salvar. A aba **Já está no acervo** reutiliza os livros carregados, sem consultar a base externa.
