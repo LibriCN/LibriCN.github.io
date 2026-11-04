@@ -80,7 +80,30 @@ Após qualquer alteração administrativa em livros, exemplares ou bibliotecas, 
 
 ## Cadastro de livros por nome, ISBN ou ID
 
-No painel administrativo, use o campo **Adicionar por nome ou ID**. Informe um título, ISBN ou identificador da Open Library, por exemplo:
+### Interface e coleta no celular
+
+A interface mantém a paleta escura com destaques vermelhos. O painel tem navegação inferior no celular, formulários em tela cheia e cartões de livros com capa, título, autores, ano e ISBN. Capas ausentes usam um marcador neutro.
+
+Em **Livros → Adicionar livro**, a busca mostra opções para conferir antes da importação. Em **Coleta rápida**, escolher o resultado não faz uma nova requisição: os dados são confirmados na tela e **Salvar e próximo** envia livro e exemplar juntos. A biblioteca, a seção e a prateleira são mantidas na sessão, e o foco volta à busca após salvar. A aba **Já está no acervo** reutiliza os livros carregados, sem consultar a base externa.
+
+As consultas externas usam cache de cinco minutos no navegador, cache de um minuto no Worker e deduplicação de buscas simultâneas. A busca usa metadados de edição na mesma resposta, evitando uma requisição extra para cada resultado. ISBN e IDs de edição preservam o registro encontrado; resultados de obra sem edição confirmada são identificados na tela. A primeira consulta ainda depende da latência e disponibilidade das bases externas. [Documentação da busca Open Library](https://openlibrary.org/dev/docs/api/search).
+
+O endpoint `POST /api/admin/books/import` também aceita `{ selection, holding }` e retorna `{ ...book, holding }`. Para um livro novo, livro e exemplar são gravados em um único batch transacional D1. Repetir a mesma seleção atualiza o exemplar existente; acesso à biblioteca e seção é validado antes da gravação.
+
+### Verificação local
+
+Para executar as novas suítes de testes, use Node.js 24+:
+
+```bash
+npm test
+npm --prefix worker test
+npm run build
+npm --prefix worker run typecheck
+```
+
+Os testes cobrem cache/deduplicação no cliente, recuperação de erros, payload combinado, resolução por ISBN, permissões, repetição do salvamento e rollback da transação. A suíte do Worker usa SQLite em memória e as migrations reais; não acessa o banco de produção.
+
+No painel administrativo, abra **Adicionar livro → Buscar livro** e informe um título, ISBN ou identificador da Open Library, por exemplo:
 
 ```text
 nome do livro

@@ -1,0 +1,128 @@
+/* Public catalog polish. Kept scoped so the admin workspace preserves its own rhythm. */
+@media (max-width: 760px) {
+  .public-shell .icon-button, .public-shell .mobile-filter-button { min-width: 44px; min-height: 44px; }
+  .public-shell .filter-panel { visibility: hidden; }
+  .public-shell .filter-panel.filter-open { visibility: visible; }
+}
+.public-shell {
+  --public-glow: rgba(179, 18, 28, .18);
+  min-height: 100vh;
+  overflow-x: clip;
+  background: radial-gradient(circle at 85% 0%, rgba(179,18,28,.09), transparent 28rem), var(--bg);
+}
+
+.public-shell .site-header {
+  background: rgba(26, 26, 26, .88);
+  backdrop-filter: blur(16px);
+}
+.public-shell .header-inner { height: 64px; }
+.public-shell .site-header { height: 64px; }
+.public-shell .brand { letter-spacing: -.02em; }
+.public-shell .brand-mark { width: 31px; height: 31px; border-radius: 8px; box-shadow: 0 7px 18px var(--public-glow); }
+.public-shell .main-nav { gap: 7px; }
+.public-shell .main-nav a { padding: 9px 13px; border-radius: 8px; font-size: 12px; }
+.public-shell .main-nav a.active { background: rgba(179,18,28,.14); color: var(--red-light); }
+
+.public-shell .global-search-strip { position: sticky; top: 64px; z-index: 15; background: rgba(18,18,18,.92); backdrop-filter: blur(12px); }
+.public-shell .global-search-inner { min-height: 52px; }
+.public-shell .global-search-inner input { font-size: 14px; }
+.public-shell .global-search-inner button { padding: 7px 10px; border-radius: 7px; background: rgba(179,18,28,.10); }
+
+.public-shell .page-container { padding-top: 58px; }
+.public-shell .home-intro {
+  position: relative;
+  padding: clamp(38px, 7vw, 78px) clamp(20px, 5vw, 64px) 50px;
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 18px;
+  background: linear-gradient(135deg, rgba(179,18,28,.13), rgba(26,26,26,.76) 46%, rgba(18,18,18,.9));
+  box-shadow: 0 25px 55px rgba(0,0,0,.18);
+  overflow: hidden;
+}
+.public-shell .home-intro::after { content: ''; position: absolute; width: 260px; height: 260px; right: -80px; bottom: -120px; border-radius: 50%; background: var(--public-glow); filter: blur(5px); pointer-events: none; }
+.public-shell .home-intro h1 { max-width: 680px; margin-top: 12px; font-size: clamp(36px, 7vw, 68px); line-height: .98; }
+.public-shell .home-intro p { max-width: 520px; margin-top: 17px; font-size: 15px; }
+.public-shell .home-search { position: relative; z-index: 1; max-width: 680px; margin-top: 30px; padding: 7px 7px 7px 16px; border-radius: 11px; background: rgba(18,18,18,.72); box-shadow: 0 12px 30px rgba(0,0,0,.17); }
+.public-shell .home-search input { font-size: 15px; }
+.public-shell .home-search button, .public-shell .search-bar-large button { padding: 11px 16px; border-radius: 8px; }
+.public-shell .quick-grid { gap: 13px; margin: 18px 0 24px; }
+.public-shell .quick-card { min-height: 82px; padding: 17px 18px; border-radius: 12px; background: rgba(26,26,26,.82); transition: transform .18s ease, border-color .18s ease, background .18s ease; }
+.public-shell .quick-card:hover { transform: translateY(-2px); border-color: rgba(225,60,60,.65); background: #211719; }
+.public-shell .home-summary { padding: 2px 0; border-color: rgba(255,255,255,.1); }
+.public-shell .home-summary span, .public-shell .home-summary small { padding: 15px 18px; }
+.public-shell .home-summary strong { font-size: 19px; }
+.public-shell .streaming-catalog { gap: 38px; margin-top: 34px; }
+.public-shell .book-rail .section-heading { margin-bottom: 16px; }
+.public-shell .book-rail .section-heading h2 { font-size: 24px; letter-spacing: -.02em; }
+.public-shell .book-rail-scroller { grid-auto-columns: minmax(148px, 16%); gap: 15px; padding-bottom: 14px; }
+.public-shell .book-tile .book-cover { height: 218px; border-radius: 9px; transition: transform .2s ease, box-shadow .2s ease; }
+.public-shell .book-tile:hover .book-cover, .public-shell .book-tile:focus-visible .book-cover { transform: translateY(-5px); box-shadow: 0 16px 28px rgba(0,0,0,.32); }
+.public-shell .book-tile-title { margin-top: 3px; font-size: 12px; }
+
+.public-shell .page-heading { margin-bottom: 34px; }
+.public-shell .page-heading h1 { font-size: clamp(34px, 6vw, 52px); }
+.public-shell .search-bar-large { width: 100%; padding: 7px 7px 7px 14px; border-radius: 11px; background: var(--panel); }
+.public-shell .filter-panel { top: 136px; border-radius: 12px; box-shadow: 0 12px 28px rgba(0,0,0,.12); }
+.public-shell .results-head { padding: 22px 0 11px; }
+.public-shell .book-row { gap: 16px; padding: 15px 10px; border-radius: 10px; transition: background .18s ease, padding .18s ease; }
+.public-shell .book-row:hover { padding-left: 14px; background: rgba(179,18,28,.08); }
+.public-shell .book-row > .book-cover { width: 50px; height: 70px; border-radius: 6px; }
+.public-shell .empty-state { border-radius: 12px; background: rgba(26,26,26,.42); }
+
+.public-shell .detail-panel, .public-shell .library-detail { border-radius: 16px; background: linear-gradient(145deg, rgba(32,32,32,.96), rgba(26,26,26,.82)); box-shadow: 0 18px 42px rgba(0,0,0,.14); }
+.public-shell .detail-panel { padding: clamp(20px, 4vw, 36px); }
+.public-shell .detail-copy h1 { font-size: clamp(30px, 5vw, 48px); }
+.public-shell .availability-summary { border-radius: 9px; border-left-width: 4px; background: rgba(18,18,18,.48); }
+.public-shell .holding-card { margin: 0 -8px; padding: 17px 8px; border-radius: 10px; }
+.public-shell .holding-card:hover { background: rgba(179,18,28,.06); }
+.public-shell .library-grid { gap: 15px; }
+.public-shell .library-card { border-radius: 13px; transition: transform .18s ease, border-color .18s ease; }
+.public-shell .library-card:hover { transform: translateY(-3px); }
+.public-shell .library-card > img, .public-shell .library-card > .library-image-fallback { width: 120px; min-height: 168px; }
+.public-shell .library-card-body { padding: 18px 35px 16px 18px; }
+.public-shell .library-card h2 { font-size: 18px; }
+.public-shell .simple-form { padding: 22px; border: 1px solid var(--line); border-radius: 14px; background: rgba(26,26,26,.7); }
+.public-shell .simple-form .button { min-height: 42px; }
+.public-shell .success-state { padding: 58px 22px; border: 1px solid var(--line); border-radius: 14px; background: rgba(26,26,26,.7); }
+
+@media (max-width: 760px) {
+  .public-shell .site-header, .public-shell .header-inner { height: 58px; }
+  .public-shell .global-search-strip { top: 58px; }
+  .public-shell .global-search-inner { min-height: 50px; }
+  .public-shell .main-nav { top: 58px; padding: 10px 14px 14px; border-bottom: 1px solid var(--line); box-shadow: 0 16px 25px rgba(0,0,0,.24); }
+  .public-shell .main-nav a { padding: 13px 12px; font-size: 13px; }
+  .public-shell .page-container { padding-top: 30px; }
+  .public-shell .home-intro { padding: 34px 20px 27px; border-radius: 14px; }
+  .public-shell .home-intro h1 { font-size: clamp(37px, 12vw, 53px); }
+  .public-shell .home-intro p { font-size: 14px; }
+  .public-shell .home-search { flex-wrap: wrap; margin-top: 23px; padding: 8px; }
+  .public-shell .home-search input { flex-basis: calc(100% - 30px); padding: 4px 0; }
+  .public-shell .home-search button { width: 100%; min-height: 43px; }
+  .public-shell .quick-grid { grid-template-columns: 1fr; gap: 9px; }
+  .public-shell .home-summary { display: grid; grid-template-columns: 1fr 1fr; }
+  .public-shell .home-summary span, .public-shell .home-summary small { padding: 12px 10px; border-right: 1px solid var(--line); }
+  .public-shell .home-summary span:nth-child(2), .public-shell .home-summary small { border-right: 0; }
+  .public-shell .home-summary span:first-child { padding-left: 10px; }
+  .public-shell .home-summary small { grid-column: 1 / -1; border-top: 1px solid var(--line); padding-left: 10px; }
+  .public-shell .streaming-catalog { gap: 29px; margin-top: 25px; }
+  .public-shell .book-rail-scroller { grid-auto-columns: minmax(132px, 41vw); gap: 11px; margin-right: -14px; padding-right: 16px; }
+  .public-shell .book-tile .book-cover { height: 188px; }
+  .public-shell .book-rail .section-heading h2 { font-size: 21px; }
+  .public-shell .search-bar-large { flex-wrap: wrap; padding: 8px; }
+  .public-shell .search-bar-large input { flex-basis: calc(100% - 30px); padding: 4px 0; }
+  .public-shell .search-bar-large button { width: 100%; min-height: 42px; }
+  .public-shell .detail-panel { gap: 18px; padding: 18px; }
+  .public-shell .detail-cover { justify-content: center; }
+  .public-shell .cover-large { width: min(160px, 52vw); height: auto; aspect-ratio: 2 / 2.85; }
+  .public-shell .detail-copy h1 { font-size: 31px; }
+  .public-shell .holding-card { grid-template-columns: 21px minmax(0, 1fr); gap: 10px; margin: 0; }
+  .public-shell .holding-stock { grid-column: 2; align-items: flex-start; text-align: left; }
+  .public-shell .library-grid { gap: 10px; }
+  .public-shell .library-card > img, .public-shell .library-card > .library-image-fallback { width: 96px; min-height: 142px; }
+  .public-shell .library-card-body { padding: 14px 31px 13px 14px; }
+  .public-shell .simple-form { padding: 17px; }
+  .public-shell .footer-line { padding-bottom: 30px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .public-shell *, .public-shell *::before, .public-shell *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; }
+}

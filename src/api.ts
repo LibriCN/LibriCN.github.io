@@ -26,9 +26,9 @@ async function request<T>(path: string, options: RequestInit = {}) {
 
 type ApiBook = Omit<Book, 'authors' | 'publicationYear' | 'coverUrl' | 'createdAt' | 'updatedAt'> & { authors: string[]; publicationYear: number | null; coverUrl: string; createdAt: string; updatedAt: string; libraries?: Array<{ id: string; libraryId: string; libraryName?: string; sectionId?: string; sectionName?: string; quantity: number; availableQuantity: number; status: LibraryBook['status']; shelfLocation: string; lastCheckedAt: string }> }
 type ApiLibrary = Omit<Library, 'openingHours' | 'sections'> & { openingHours: string; sections?: LibrarySection[]; bookCount?: number }
-export type ExternalBookResult = { source: string; externalSource?: string; externalId?: string; title: string; authors: string[]; isbn: string; publicationYear: number | null; genre: string; subject: string; description: string; coverUrl: string }
+export type ExternalBookResult = { source: string; externalSource?: string; externalId?: string; recordType?: 'work' | 'edition'; workId?: string; editionKey?: string; editionCount?: number; title: string; authors: string[]; isbn: string; publicationYear: number | null; genre: string; subject: string; description: string; coverUrl: string }
 
-function toBook(book: ApiBook): Book { return { ...book, publicationYear: book.publicationYear || 0, coverUrl: book.coverUrl || 'https://covers.openlibrary.org/b/id/8228691-L.jpg' } }
+function toBook(book: ApiBook): Book { return { ...book, publicationYear: book.publicationYear || 0, coverUrl: book.coverUrl || '' } }
 function toLibrary(library: ApiLibrary): Library { return { ...library, sections: library.sections || [] } }
 function holdingsFromBooks(books: ApiBook[]): LibraryBook[] { return books.flatMap(book => (book.libraries || []).map(holding => ({ id: holding.id, bookId: book.id, libraryId: holding.libraryId, quantity: holding.quantity, availableQuantity: holding.availableQuantity, status: holding.status, shelfLocation: holding.shelfLocation, sectionId: holding.sectionId, sectionName: holding.sectionName, lastCheckedAt: holding.lastCheckedAt }))) }
 export async function loadPublicData() { const cacheKey = 'catalog:all'; const cached = readCache<ReturnType<typeof normalizePublicData>>(cacheKey); if (cached) return cached; const [bookResponse, libraryResponse] = await Promise.all([request<{ data: ApiBook[] }>('/api/books?limit=50'), request<{ data: ApiLibrary[] }>('/api/libraries')]); const data = normalizePublicData(bookResponse.data || [], libraryResponse.data || []); return writeCache(cacheKey, data, 30_000) }
@@ -40,7 +40,7 @@ export async function logout() { if (apiConfigured) await request('/api/auth/log
 export async function adminListBooks(search = '') { return request<{ data: ApiBook[] }>('/api/admin/books?limit=100' + (search ? `&q=${encodeURIComponent(search)}` : '')) }
 export async function createBook(book: Book) { const response = await request<ApiBook>('/api/admin/books', { method: 'POST', body: JSON.stringify(bookPayload(book)) }); invalidateCache('catalog:'); return toBook(response) }
 export async function importBookReference(reference: string) { const response = await request<ApiBook>('/api/admin/books/import', { method: 'POST', body: JSON.stringify({ reference }) }); invalidateCache('catalog:'); return toBook(response) }
-export async function importBookSelection(selection: ExternalBookResult) { const response = await request<ApiBook>('/api/admin/books/import', { method: 'POST', body: JSON.stringify({ selection: { ...selection, externalSource: selection.externalSource || 'openlibrary', externalId: selection.externalId || selection.isbn || selection.title } }) }); invalidateCache('catalog:'); return toBook(response) }
+export async function importBookSelection(selection: ExternalBookResult, holding?: Omit<LibraryBook, 'id' | 'bookId' | 'lastCheckedAt'>) { const response = await request<ApiBook & { holding?: LibraryBook }>('/api/admin/books/import', { method: 'POST', body: JSON.stringify({ selection: { ...selection, externalSource: selection.externalSource || 'openlibrary', externalId: selection.externalId || selection.isbn || selection.title }, holding }) }); invalidateCache('catalog:'); return { ...toBook(response), holding: response.holding } }
 export async function updateBook(book: Book) { const response = await request<ApiBook>(`/api/admin/books/${book.id}`, { method: 'PUT', body: JSON.stringify(bookPayload(book)) }); invalidateCache('catalog:'); return toBook(response) }
 export async function deleteBook(id: string) { const response = await request(`/api/admin/books/${id}`, { method: 'DELETE' }); invalidateCache('catalog:'); return response }
 export async function createHolding(bookId: string, holding: LibraryBook) { const response = await request(`/api/admin/books/${bookId}/libraries`, { method: 'POST', body: JSON.stringify(holdingPayload(holding)) }); invalidateCache('catalog:'); return response }
@@ -52,7 +52,20 @@ export async function updateLibrary(library: Library) { const response = await r
 export async function deleteLibrary(id: string) { const response = await request(`/api/admin/libraries/${id}`, { method: 'DELETE' }); invalidateCache('catalog:'); return response }
 export async function listSuggestions(status = '') { const response = await request<{ data: Array<Record<string, unknown>> }>(`/api/admin/suggestions${status ? `?status=${encodeURIComponent(status)}` : ''}`); return (response.data || []).map(toSuggestion) }
 export async function updateSuggestion(id: string, status: SuggestionStatus) { return request(`/api/admin/suggestions/${id}`, { method: 'PUT', body: JSON.stringify({ status }) }) }
-export async function externalBooks(query: string) { return request<{ data: ExternalBookResult[] }>(`/api/admin/external-books?query=${encodeURIComponent(query)}`) }
+const externalSearches = new Map<string, Promise<{ data: ExternalBookResult[] }>>()
+export async function externalBooks(query: string) {
+  const normalized = query.trim().replace(/\s+/g, ' ').toLowerCase()
+  const key = `external:${normalized}`
+  const cached = readCache<{ data: ExternalBookResult[] }>(key)
+  if (cached) return cached
+  const pending = externalSearches.get(key)
+  if (pending) return pending
+  const search = request<{ data: ExternalBookResult[] }>(`/api/admin/external-books?query=${encodeURIComponent(query.trim())}`)
+    .then(result => writeCache(key, result, result.data.length ? 300_000 : 15_000))
+    .finally(() => externalSearches.delete(key))
+  externalSearches.set(key, search)
+  return search
+}
 export async function downloadCsv() { if (!appConfig.apiUrl) throw new ApiError('API não configurada.'); const headers = new Headers({ Authorization: `Bearer ${token()}` }); const response = await fetch(`${appConfig.apiUrl}/api/admin/export/csv`, { headers }); if (!response.ok) throw new ApiError('Não foi possível exportar o acervo.', response.status); return response.blob() }
 export async function cloudinaryConfig() { return request<{ enabled: boolean; provider: 'cloudinary'; cloudName: string; uploadPreset: string }>('/api/admin/media/config') }
 export async function uploadToCloudinary(file: File, config: { cloudName: string; uploadPreset: string }) { const form = new FormData(); form.append('file', file); form.append('upload_preset', config.uploadPreset); let response: Response; try { response = await fetch(`https://api.cloudinary.com/v1_1/${encodeURIComponent(config.cloudName)}/auto/upload`, { method: 'POST', body: form }) } catch { throw new ApiError('Não foi possível enviar a imagem.') } const data = await response.json().catch(() => null) as { secure_url?: string } | null; if (!response.ok || !data?.secure_url) throw new ApiError('O Cloudinary não aceitou a imagem.', response.status); return data.secure_url }

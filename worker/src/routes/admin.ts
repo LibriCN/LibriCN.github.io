@@ -1,4 +1,4 @@
-import type { AuthUser, Env, DbBook, DbLibrary, DbLibraryBook, DbLibrarySection, BookStatus, Role, SuggestionStatus } from '../types'
+import type { AuthUser, Env, DbBook, DbLibrary, DbLibraryBook, DbLibrarySection, BookStatus, Role, SuggestionStatus, HoldingDto } from '../types'
 import { authorsJson, bookDto, holdingDto, libraryDto, sectionDto } from '../lib/db'
 import { body, HttpError, id, json, now, text } from '../lib/http'
 import { hashPassword, signJwt, verifyPassword } from '../lib/crypto'
@@ -28,7 +28,7 @@ async function requireBookAccess(env: Env, actor: AuthUser, bookId: string) { if
 export async function adminRoute(request: Request, env: Env, subpath: string, url: URL, actor: AuthUser) {
   if (subpath === '/books' && request.method === 'GET') return adminBooks(request, env, url, actor)
   if (subpath === '/books' && request.method === 'POST') { capability(actor, canWriteCatalog(actor)); return createBook(request, env) }
-  if (subpath === '/books/import' && request.method === 'POST') { capability(actor, canWriteCatalog(actor)); return importBookReference(request, env) }
+  if (subpath === '/books/import' && request.method === 'POST') { capability(actor, canWriteCatalog(actor)); return importBookReference(request, env, actor) }
   if (subpath === '/books/localize' && request.method === 'POST') { capability(actor, isAdmin(actor)); return localizeCatalog(request, env) }
   const bookMatch = subpath.match(/^\/books\/([^/]+)$/); if (bookMatch && request.method === 'PUT') { capability(actor, canWriteCatalog(actor)); await requireBookAccess(env, actor, bookMatch[1]); return updateBook(request, env, bookMatch[1]) } if (bookMatch && request.method === 'DELETE') { capability(actor, isAdmin(actor) || actor.role === 'manager'); await requireBookAccess(env, actor, bookMatch[1]); return deleteBook(request, env, bookMatch[1]) }
   const bookLibrariesMatch = subpath.match(/^\/books\/([^/]+)\/libraries$/); if (bookLibrariesMatch && request.method === 'POST') { capability(actor, canWriteCatalog(actor)); return createHolding(request, env, bookLibrariesMatch[1], actor) }
@@ -57,7 +57,22 @@ function normalizedBook(input: BookPayload, current?: DbBook) { const title = te
 async function createBook(request: Request, env: Env) { const input = await body<BookPayload>(request); const book = normalizedBook(input); const bookId = id('book'); await env.DB.prepare('INSERT INTO books (id, title, authors_json, description, isbn, genre, subject, publication_year, cover_url, external_source, external_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').bind(bookId, book.title, book.authors, book.description, book.isbn, book.genre, book.subject, book.publicationYear, book.coverUrl, book.externalSource, book.externalId, book.timestamp, book.timestamp).run(); const row = await env.DB.prepare('SELECT * FROM books WHERE id = ?').bind(bookId).first<DbBook>(); return json(bookDto(row!), 201, request, env) }
 async function updateBook(request: Request, env: Env, bookId: string) { const current = await env.DB.prepare('SELECT * FROM books WHERE id = ? AND is_deleted = 0').bind(bookId).first<DbBook>(); if (!current) return json({ error: 'Livro não encontrado.' }, 404, request, env); const input = await body<BookPayload>(request); const book = normalizedBook(input, current); await env.DB.prepare('UPDATE books SET title=?, authors_json=?, description=?, isbn=?, genre=?, subject=?, publication_year=?, cover_url=?, external_source=?, external_id=?, updated_at=? WHERE id=?').bind(book.title, book.authors, book.description, book.isbn, book.genre, book.subject, book.publicationYear, book.coverUrl, book.externalSource, book.externalId, book.timestamp, bookId).run(); const row = await env.DB.prepare('SELECT * FROM books WHERE id = ?').bind(bookId).first<DbBook>(); return json(bookDto(row!), 200, request, env) }
 
-type ExternalBookReference = { title: string; authors: string[]; isbn: string; publicationYear: number | null; genre: string; subject: string; description?: string; coverUrl: string; externalSource: string; externalId: string }
+type ExternalBookReference = { title: string; authors: string[]; isbn: string; publicationYear: number | null; genre: string; subject: string; description?: string; coverUrl: string; externalSource: string; externalId: string; editionKey?: string; editionCount?: number; workId?: string; recordType?: 'edition' | 'work' }
+type ExternalSearchCacheEntry = { expiresAt: number; value: Array<Record<string, unknown>> }
+const externalSearchCache = new Map<string, ExternalSearchCacheEntry>()
+const externalSearchInflight = new Map<string, Promise<Array<Record<string, unknown>>>>()
+const EXTERNAL_CACHE_TTL = 60_000
+const EXTERNAL_CACHE_MAX = 100
+
+export async function fetchJson<T>(url: string, timeoutMs = 4_000): Promise<T | null> {
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    const response = await fetch(url, { signal: controller.signal })
+    if (!response.ok) return null
+    return await response.json<T>()
+  } catch { return null } finally { clearTimeout(timeout) }
+}
 function openLibraryId(value: string) { const match = value.match(/OL\d+[WM]/i); return match ? match[0].toUpperCase() : '' }
 function portugueseTitle(title: string) {
   const normalized = title.toLowerCase().replace(/[’']/g, "'").trim()
@@ -94,43 +109,107 @@ function workIdFrom(value: unknown) { const match = String(value || '').match(/O
 async function portugueseEdition(workId: string) {
   if (!workId) return null
   try {
-    const response = await fetch(`https://openlibrary.org/works/${workId}/editions.json?limit=100&fields=title,language,languages,isbn,isbn_13,isbn_10,publish_date,first_publish_year,cover_i`)
-    if (!response.ok) return null
-    const data = await response.json<{ entries?: Array<Record<string, unknown>> }>()
+    const data = await fetchJson<{ entries?: Array<Record<string, unknown>> }>(`https://openlibrary.org/works/${workId}/editions.json?limit=40&fields=title,language,languages,isbn,isbn_13,isbn_10,publish_date,first_publish_year,cover_i`)
+    if (!data) return null
     const edition = (data.entries || []).find(item => JSON.stringify(item.languages || item.language || []).toLowerCase().match(/languages\/(por|pt)/))
     if (!edition) return null
     const isbn = firstText(edition.isbn_13) || firstText(edition.isbn) || firstText(edition.isbn_10)
     return { title: text(edition.title, 180), isbn, publicationYear: yearFrom(edition.publish_date || edition.first_publish_year), coverUrl: edition.cover_i ? `https://covers.openlibrary.org/b/id/${edition.cover_i}-L.jpg` : '' }
   } catch { return null }
 }
-async function openLibrarySearch(query: string, limit: number, portuguese = true) {
-  const language = portuguese ? '&language=por' : ''
-  const response = await fetch(`https://openlibrary.org/search.json?q=${encodeURIComponent(query)}${language}&limit=${limit}&fields=key,title,author_name,isbn,first_publish_year,subject,cover_i,description`)
-  if (!response.ok) return []
-  const data = await response.json<{ docs?: Array<Record<string, unknown>> }>()
-  return data.docs || []
+export async function openLibrarySearch(query: string, limit: number, portuguese = true) {
+  const cacheKey = `${portuguese ? 'pt' : 'all'}:${query.trim().toLowerCase()}:${limit}`
+  const cached = externalSearchCache.get(cacheKey)
+  if (cached && cached.expiresAt > Date.now()) return cached.value
+  const pending = externalSearchInflight.get(cacheKey)
+  if (pending) return pending
+  const language = portuguese ? '&lang=pt' : ''
+  const promise = (async () => {
+    const data = await fetchJson<{ docs?: Array<Record<string, unknown>> }>(`https://openlibrary.org/search.json?q=${encodeURIComponent(query)}${language}&limit=${limit}&fields=key,title,author_name,first_publish_year,subject,cover_i,description,edition_count,publish_date,editions,editions.key,editions.title,editions.isbn,editions.publish_date,editions.cover_i,editions.language,editions.author`)
+    if (!data) throw new HttpError('A busca externa está indisponível no momento.', 503)
+    const value = data.docs || []
+    if (externalSearchCache.size >= EXTERNAL_CACHE_MAX) externalSearchCache.delete(externalSearchCache.keys().next().value as string)
+    externalSearchCache.set(cacheKey, { expiresAt: Date.now() + EXTERNAL_CACHE_TTL, value })
+    return value
+  })()
+  externalSearchInflight.set(cacheKey, promise)
+  try { return await promise } finally { externalSearchInflight.delete(cacheKey) }
 }
-async function externalFromDoc(doc: Record<string, unknown>): Promise<ExternalBookReference> {
+export function externalFromDoc(doc: Record<string, unknown>): ExternalBookReference & Record<string, unknown> {
   const rawKey = String(doc.key || '')
-  const workId = workIdFrom(rawKey)
-  const localized = await portugueseEdition(workId)
   const subjects = Array.isArray(doc.subject) ? doc.subject.map(String) : []
-  const isbn = localized?.isbn || firstText(doc.isbn)
-  return { title: localized?.title || portugueseTitle(text(doc.title, 180)), authors: Array.isArray(doc.author_name) ? doc.author_name.slice(0, 4).map(String) : [], isbn, publicationYear: localized?.publicationYear || Number(doc.first_publish_year) || null, genre: portugueseCategory(subjects), subject: portugueseCategory(subjects), description: text(typeof doc.description === 'string' ? doc.description : '', 5000), coverUrl: localized?.coverUrl || (doc.cover_i ? `https://covers.openlibrary.org/b/id/${doc.cover_i}-L.jpg` : ''), externalSource: 'openlibrary', externalId: openLibraryId(rawKey) || isbn }
+  const nestedEditions = typeof doc.editions === 'object' && doc.editions ? (doc.editions as { docs?: Array<Record<string, unknown>> }).docs || [] : []
+  const edition = nestedEditions.find(item => openLibraryId(String(item.key || '')) || firstText(item.isbn))
+  const workId = openLibraryId(rawKey)
+  const editionKey = edition ? openLibraryId(String(edition.key || '')) : ''
+  const isbn = edition ? firstText(edition.isbn) : ''
+  const title = edition ? text(edition.title || doc.title, 180) : text(doc.title, 180)
+  const publicationYear = edition ? yearFrom(edition.publish_date || edition.first_publish_year) : Number(doc.first_publish_year) || null
+  const coverId = edition?.cover_i || doc.cover_i
+  return { title, authors: Array.isArray(doc.author_name) ? doc.author_name.slice(0, 4).map(String) : [], isbn, publicationYear, genre: portugueseCategory(subjects), subject: portugueseCategory(subjects), description: text(typeof doc.description === 'string' ? doc.description : '', 5000), coverUrl: coverId ? `https://covers.openlibrary.org/b/id/${coverId}-L.jpg` : '', externalSource: 'openlibrary', externalId: editionKey || workId, editionKey, editionCount: Number(doc.edition_count) || 0, workId, recordType: editionKey ? 'edition' : 'work' }
 }
 function mediaConfig(request: Request, env: Env) { const cloudName = text(env.CLOUDINARY_CLOUD_NAME, 100); const uploadPreset = text(env.CLOUDINARY_UPLOAD_PRESET, 100); return json({ enabled: Boolean(cloudName && uploadPreset), provider: 'cloudinary', cloudName, uploadPreset }, 200, request, env) }
-async function resolveBookReference(reference: string): Promise<ExternalBookReference | null> {
+export async function resolveBookReference(reference: string, preloadedRecord?: Record<string, unknown>): Promise<ExternalBookReference | null> {
+  const isbnReference = reference.replaceAll('-', '').replaceAll(' ', '')
+  if (/^\d{10,13}$/.test(isbnReference)) {
+    const isbnRecord = await fetchJson<Record<string, unknown>>(`https://openlibrary.org/isbn/${isbnReference}.json`)
+    const isbnKey = openLibraryId(String(isbnRecord?.key || ''))
+    if (isbnKey) return resolveBookReference(isbnKey, isbnRecord ? { ...isbnRecord, isbn_13: isbnRecord.isbn_13 || [isbnReference] } : undefined)
+  }
   const directId = openLibraryId(reference)
   if (directId) {
-    const kind = directId.endsWith('W') ? 'works' : 'books'; const response = await fetch(`https://openlibrary.org/${kind}/${directId}.json`); if (!response.ok) return null
-    const record = await response.json<Record<string, unknown>>(); const rawAuthors = Array.isArray(record.authors) ? record.authors : []; const authors = (await Promise.all(rawAuthors.slice(0, 4).map(async author => { const key = typeof author === 'object' && author ? String((author as { author?: { key?: string } }).author?.key || '') : ''; if (!key) return ''; const authorResponse = await fetch(`https://openlibrary.org${key}.json`); if (!authorResponse.ok) return ''; const authorData = await authorResponse.json<{ name?: string }>(); return text(authorData.name, 180) }))).filter(Boolean)
+    const kind = directId.endsWith('W') ? 'works' : 'books'; const record = preloadedRecord || await fetchJson<Record<string, unknown>>(`https://openlibrary.org/${kind}/${directId}.json`); if (!record) return null
+    const rawAuthors = Array.isArray(record.authors) ? record.authors : []; const authors = (await Promise.all(rawAuthors.slice(0, 4).map(async author => { const key = typeof author === 'object' && author ? String((author as { author?: { key?: string }; key?: string }).author?.key || (author as { key?: string }).key || '') : ''; if (!key) return ''; const authorData = await fetchJson<{ name?: string }>(`https://openlibrary.org${key}.json`); return text(authorData?.name, 180) }))).filter(Boolean)
     const workId = directId.endsWith('W') ? directId : workIdFrom(Array.isArray(record.works) ? (record.works[0] as { key?: string })?.key : '')
-    const localized = await portugueseEdition(workId); const covers = Array.isArray(record.covers) ? record.covers : []; const subjects = Array.isArray(record.subjects) ? record.subjects.map(String) : []
-    return { title: localized?.title || portugueseTitle(text(record.title, 180)), authors, isbn: localized?.isbn || firstText(record.isbn_13) || firstText(record.isbn_10), publicationYear: localized?.publicationYear || yearFrom(record.publish_date), genre: portugueseCategory(subjects), subject: portugueseCategory(subjects), coverUrl: localized?.coverUrl || (covers[0] ? `https://covers.openlibrary.org/b/id/${covers[0]}-L.jpg` : ''), externalSource: 'openlibrary', externalId: directId }
+    const localized = directId.endsWith('M') ? null : await portugueseEdition(workId); const covers = Array.isArray(record.covers) ? record.covers : []; const subjects = Array.isArray(record.subjects) ? record.subjects.map(String) : []
+    return { title: localized?.title || text(record.title, 180), authors, isbn: localized?.isbn || firstText(record.isbn_13) || firstText(record.isbn_10), publicationYear: localized?.publicationYear || yearFrom(record.publish_date), genre: portugueseCategory(subjects), subject: portugueseCategory(subjects), coverUrl: localized?.coverUrl || (covers[0] ? `https://covers.openlibrary.org/b/id/${covers[0]}-L.jpg` : ''), externalSource: 'openlibrary', externalId: directId, editionKey: directId.endsWith('M') ? directId : '', workId: directId.endsWith('W') ? directId : workId, recordType: directId.endsWith('M') ? 'edition' : 'work' }
   }
   const query = /^\d[\d -]{8,}$/.test(reference) ? `isbn:${reference.replaceAll('-', ' ')}` : reference; const docs = await openLibrarySearch(query, 1, true); const fallback = docs.length ? docs : await openLibrarySearch(query, 1, false); return fallback[0] ? externalFromDoc(fallback[0]) : null
 }
-async function importBookReference(request: Request, env: Env) { const input = await body<{ reference?: string; selection?: ExternalBookReference }>(request); const reference = text(input.reference, 180); const resolved = input.selection?.title ? input.selection : reference.length >= 2 ? await resolveBookReference(reference) : null; if (!resolved?.title) throw new HttpError('Livro não encontrado na Open Library.', 404); const existing = await env.DB.prepare('SELECT * FROM books WHERE external_source = ? AND external_id = ? AND is_deleted = 0').bind(resolved.externalSource, resolved.externalId).first<DbBook>(); if (existing) return json(bookDto(existing), 200, request, env); const timestamp = now(); const bookId = id('book'); await env.DB.prepare('INSERT INTO books (id,title,authors_json,description,isbn,genre,subject,publication_year,cover_url,external_source,external_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)').bind(bookId, resolved.title, authorsJson(resolved.authors), resolved.description || '', resolved.isbn, resolved.genre, resolved.subject, resolved.publicationYear, resolved.coverUrl, resolved.externalSource, resolved.externalId, timestamp, timestamp).run(); const row = await env.DB.prepare('SELECT * FROM books WHERE id=?').bind(bookId).first<DbBook>(); return json(bookDto(row!), 201, request, env) }
+type ImportInput = { reference?: string; selection?: ExternalBookReference; holding?: HoldingPayload }
+async function saveImportHolding(env: Env, bookId: string, holding: HoldingPayload, actor: AuthUser) {
+  const libraryId = text(holding.libraryId, 80)
+  if (!libraryId) throw new HttpError('Informe a biblioteca para salvar o exemplar.')
+  await requireLibraryAccess(env, actor, libraryId)
+  const sectionId = text(holding.sectionId, 80) || null
+  await validateSection(env, sectionId, libraryId)
+  const item = validHolding(holding)
+  const existing = await env.DB.prepare('SELECT id FROM library_books WHERE book_id=? AND library_id=?').bind(bookId, libraryId).first<{ id: string }>()
+  const holdingId = existing?.id || id('holding')
+  if (existing) {
+    await env.DB.prepare('UPDATE library_books SET section_id=?,quantity=?,available_quantity=?,status=?,shelf_location=?,last_checked_at=? WHERE id=?').bind(sectionId, item.quantity, item.availableQuantity, item.status, item.shelfLocation, now(), holdingId).run()
+  } else {
+    await env.DB.prepare('INSERT INTO library_books (id,book_id,library_id,section_id,quantity,available_quantity,status,shelf_location,last_checked_at) VALUES (?,?,?,?,?,?,?,?,?)').bind(holdingId, bookId, libraryId, sectionId, item.quantity, item.availableQuantity, item.status, item.shelfLocation, now()).run()
+  }
+  const row = await env.DB.prepare('SELECT lb.*,l.name AS library_name,s.name AS section_name FROM library_books lb JOIN libraries l ON l.id=lb.library_id LEFT JOIN library_sections s ON s.id=lb.section_id WHERE lb.id=?').bind(holdingId).first<DbLibraryBook & { library_name: string; section_name?: string }>()
+  return row ? holdingDto(row) : undefined
+}
+async function importBookReference(request: Request, env: Env, actor: AuthUser) {
+  const input = await body<ImportInput>(request); const reference = text(input.reference, 180); const resolved = input.selection?.title ? input.selection : reference.length >= 2 ? await resolveBookReference(reference) : null
+  if (!resolved?.title) throw new HttpError('Livro não encontrado na Open Library.', 404)
+  const existing = await env.DB.prepare('SELECT * FROM books WHERE external_source = ? AND external_id = ? AND is_deleted = 0').bind(resolved.externalSource, resolved.externalId).first<DbBook>()
+  if (existing) { const holding = input.holding ? await saveImportHolding(env, existing.id, input.holding, actor) : undefined; return json(holding ? { ...bookDto(existing), holding } : bookDto(existing), 200, request, env) }
+  const timestamp = now(); const bookId = id('book')
+  const bookInsert = env.DB.prepare('INSERT INTO books (id,title,authors_json,description,isbn,genre,subject,publication_year,cover_url,external_source,external_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)').bind(bookId, resolved.title, authorsJson(resolved.authors), resolved.description || '', resolved.isbn, resolved.genre, resolved.subject, resolved.publicationYear, resolved.coverUrl, resolved.externalSource, resolved.externalId, timestamp, timestamp)
+  let holding: HoldingDto | undefined
+  if (input.holding) {
+    const libraryId = text(input.holding.libraryId, 80)
+    if (!libraryId) throw new HttpError('Informe a biblioteca para salvar o exemplar.')
+    await requireLibraryAccess(env, actor, libraryId)
+    const sectionId = text(input.holding.sectionId, 80) || null
+    await validateSection(env, sectionId, libraryId)
+    const item = validHolding(input.holding)
+    const holdingId = id('holding')
+    const holdingInsert = env.DB.prepare('INSERT INTO library_books (id,book_id,library_id,section_id,quantity,available_quantity,status,shelf_location,last_checked_at) VALUES (?,?,?,?,?,?,?,?,?)').bind(holdingId, bookId, libraryId, sectionId, item.quantity, item.availableQuantity, item.status, item.shelfLocation, timestamp)
+    await env.DB.batch([bookInsert, holdingInsert])
+    const savedHolding = await env.DB.prepare('SELECT lb.*,l.name AS library_name,s.name AS section_name FROM library_books lb JOIN libraries l ON l.id=lb.library_id LEFT JOIN library_sections s ON s.id=lb.section_id WHERE lb.id=?').bind(holdingId).first<DbLibraryBook & { library_name: string; section_name?: string }>()
+    holding = savedHolding ? holdingDto(savedHolding) : undefined
+  } else {
+    await bookInsert.run()
+  }
+  const row = await env.DB.prepare('SELECT * FROM books WHERE id=?').bind(bookId).first<DbBook>()
+  return json(holding ? { ...bookDto(row!), holding } : bookDto(row!), 201, request, env)
+}
 async function localizeCatalog(request: Request, env: Env) { const rows = await env.DB.prepare("SELECT * FROM books WHERE is_deleted=0 AND external_source='openlibrary' AND external_id <> '' ORDER BY updated_at DESC LIMIT 100").all<DbBook>(); const updates = await Promise.all((rows.results || []).map(async row => { const localized = await resolveBookReference(row.external_id); return localized?.title ? { row, localized } : null })); const statements = updates.filter(Boolean).map(item => { const value = item!; return env.DB.prepare('UPDATE books SET title=?,authors_json=?,isbn=?,genre=?,subject=?,publication_year=?,cover_url=?,updated_at=? WHERE id=?').bind(value.localized.title, authorsJson(value.localized.authors), value.localized.isbn || value.row.isbn, value.localized.genre, value.localized.subject, value.localized.publicationYear || value.row.publication_year, value.localized.coverUrl || value.row.cover_url, now(), value.row.id) }); if (statements.length) await env.DB.batch(statements); return json({ updated: statements.length, checked: rows.results?.length || 0 }, 200, request, env) }
 async function deleteBook(request: Request, env: Env, bookId: string) { await env.DB.prepare('UPDATE books SET is_deleted=1, updated_at=? WHERE id=?').bind(now(), bookId).run(); return json({ message: 'Livro removido do catálogo.' }, 200, request, env) }
 
@@ -142,7 +221,7 @@ async function updateLibrary(request: Request, env: Env, libraryId: string) { co
 async function deleteLibrary(request: Request, env: Env, libraryId: string) { await env.DB.prepare('UPDATE libraries SET is_deleted=1,updated_at=? WHERE id=?').bind(now(), libraryId).run(); return json({ message: 'Biblioteca removida da rede.' }, 200, request, env) }
 
 interface HoldingPayload { libraryId?: string; sectionId?: string | null; quantity?: number; availableQuantity?: number; status?: BookStatus; shelfLocation?: string }
-function validHolding(input: HoldingPayload) { const quantity = Math.max(0, Number(input.quantity || 0)); const availableQuantity = Math.min(quantity, Math.max(0, Number(input.availableQuantity || 0))); const status: BookStatus = availableQuantity > 0 ? 'disponivel' : input.status === 'emprestado' ? 'emprestado' : 'indisponivel'; return { quantity, availableQuantity, status, shelfLocation: text(input.shelfLocation, 120), sectionId: text(input.sectionId, 80) || null } }
+export function validHolding(input: HoldingPayload) { const quantity = Math.max(0, Number(input.quantity || 0)); const availableQuantity = Math.min(quantity, Math.max(0, Number(input.availableQuantity || 0))); const status: BookStatus = availableQuantity > 0 ? 'disponivel' : input.status === 'emprestado' ? 'emprestado' : 'indisponivel'; return { quantity, availableQuantity, status, shelfLocation: text(input.shelfLocation, 120), sectionId: text(input.sectionId, 80) || null } }
 async function validateSection(env: Env, sectionId: string | null, libraryId: string) { if (!sectionId) return; const section = await env.DB.prepare('SELECT id FROM library_sections WHERE id=? AND library_id=? AND is_active=1').bind(sectionId, libraryId).first(); if (!section) throw new HttpError('A seção escolhida não pertence a esta biblioteca.', 400) }
 async function createHolding(request: Request, env: Env, bookId: string, actor: AuthUser) { const input = await body<HoldingPayload>(request); if (!input.libraryId) throw new HttpError('Informe a biblioteca.'); await requireLibraryAccess(env, actor, input.libraryId); await validateSection(env, text(input.sectionId, 80) || null, input.libraryId); const book = await env.DB.prepare('SELECT id FROM books WHERE id=? AND is_deleted=0').bind(bookId).first(); if (!book) throw new HttpError('Livro não encontrado.', 404); const item = validHolding(input); const holdingId = id('holding'); await env.DB.prepare('INSERT INTO library_books (id,book_id,library_id,section_id,quantity,available_quantity,status,shelf_location,last_checked_at) VALUES (?,?,?,?,?,?,?,?,?)').bind(holdingId, bookId, input.libraryId, item.sectionId, item.quantity, item.availableQuantity, item.status, item.shelfLocation, now()).run(); return json({ id: holdingId, bookId, libraryId: input.libraryId, ...item }, 201, request, env) }
 async function updateHolding(request: Request, env: Env, holdingId: string, actor: AuthUser) { const current = await env.DB.prepare('SELECT id,library_id FROM library_books WHERE id=?').bind(holdingId).first<{ id: string; library_id: string }>(); if (!current) return json({ error: 'Associação não encontrada.' }, 404, request, env); await requireLibraryAccess(env, actor, current.library_id); const input = await body<HoldingPayload>(request); await validateSection(env, text(input.sectionId, 80) || null, current.library_id); const item = validHolding(input); await env.DB.prepare('UPDATE library_books SET section_id=?,quantity=?,available_quantity=?,status=?,shelf_location=?,last_checked_at=? WHERE id=?').bind(item.sectionId, item.quantity, item.availableQuantity, item.status, item.shelfLocation, now(), holdingId).run(); const row = await env.DB.prepare('SELECT lb.*,l.name AS library_name,s.name AS section_name FROM library_books lb JOIN libraries l ON l.id=lb.library_id LEFT JOIN library_sections s ON s.id=lb.section_id WHERE lb.id=?').bind(holdingId).first<DbLibraryBook & { library_name: string; section_name?: string }>(); return json(holdingDto(row!), 200, request, env) }
@@ -178,13 +257,21 @@ async function externalBooks(request: Request, env: Env, url: URL) {
   const query = text(url.searchParams.get('query') || url.searchParams.get('q'), 180)
   if (query.length < 2) throw new HttpError('Informe pelo menos 2 caracteres para buscar.')
   const directId = openLibraryId(query)
-  if (directId) { const resolved = await resolveBookReference(directId); return json({ data: resolved ? [{ ...resolved, source: 'Open Library' }] : [] }, 200, request, env) }
-  let docs = await openLibrarySearch(query, 10, true)
-  if (!docs.length) docs = await openLibrarySearch(query, 10, false)
-  let results: Array<Record<string, unknown>> = (await Promise.all(docs.map(externalFromDoc))).filter(item => item.title)
+  const normalizedIsbn = query.replaceAll('-', '').replaceAll(' ', '')
+  const directIsbn = /^(?:\d{9}[\dXx]|\d{13})$/.test(normalizedIsbn)
+  if (directId || directIsbn) { const resolved = await resolveBookReference(directId || normalizedIsbn); return json({ data: resolved ? [{ ...resolved, source: 'Open Library' }] : [] }, 200, request, env) }
+  let docs: Array<Record<string, unknown>> = []
+  let openLibraryUnavailable = false
+  try {
+    docs = await openLibrarySearch(query, 10, true)
+    if (!docs.length) docs = await openLibrarySearch(query, 10, false)
+  } catch { openLibraryUnavailable = true }
+  let results: Array<Record<string, unknown>> = docs.map(externalFromDoc).filter(item => item.title)
+  let googleUnavailable = false
   if (!results.length && env.GOOGLE_BOOKS_API_KEY) {
-    const google = await fetch(`https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(query)}&maxResults=10&key=${env.GOOGLE_BOOKS_API_KEY}`)
-    if (google.ok) { const data = await google.json<{ items?: Array<{ id?: string; volumeInfo?: Record<string, unknown> }> }>(); results = (data.items || []).map(item => { const info = item.volumeInfo || {}; const subjects = Array.isArray(info.categories) ? info.categories.map(String) : []; return { source: 'Google Books', externalSource: 'googlebooks', externalId: String(item.id || ''), title: text(info.title, 180), authors: Array.isArray(info.authors) ? info.authors.slice(0, 4).map(String) : [], isbn: '', publicationYear: yearFrom(info.publishedDate), genre: portugueseCategory(subjects), subject: portugueseCategory(subjects), description: text(info.description, 5000), coverUrl: typeof info.imageLinks === 'object' && info.imageLinks ? String((info.imageLinks as { thumbnail?: string }).thumbnail || '') : '' } }).filter(item => item.title) }
+    const data = await fetchJson<{ items?: Array<{ id?: string; volumeInfo?: Record<string, unknown> }> }>(`https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(query)}&maxResults=10&key=${env.GOOGLE_BOOKS_API_KEY}`)
+    if (data) { results = (data.items || []).map(item => { const info = item.volumeInfo || {}; const subjects = Array.isArray(info.categories) ? info.categories.map(String) : []; return { source: 'Google Books', externalSource: 'googlebooks', externalId: String(item.id || ''), title: text(info.title, 180), authors: Array.isArray(info.authors) ? info.authors.slice(0, 4).map(String) : [], isbn: '', publicationYear: yearFrom(info.publishedDate), genre: portugueseCategory(subjects), subject: portugueseCategory(subjects), description: text(info.description, 5000), coverUrl: typeof info.imageLinks === 'object' && info.imageLinks ? String((info.imageLinks as { thumbnail?: string }).thumbnail || '') : '' } }).filter(item => item.title) } else googleUnavailable = true
   }
+  if (!results.length && (openLibraryUnavailable || googleUnavailable) && (!env.GOOGLE_BOOKS_API_KEY || googleUnavailable)) throw new HttpError('As bases externas estão indisponíveis no momento.', 503)
   return json({ data: results }, 200, request, env)
 }

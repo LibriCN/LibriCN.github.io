@@ -30,7 +30,10 @@ export function text(value: unknown, max = 2000) { return String(value ?? '').tr
 export function id(prefix: string) { return `${prefix}_${crypto.randomUUID().replaceAll('-', '').slice(0, 18)}` }
 export function now() { return new Date().toISOString() }
 
-export class HttpError extends Error { constructor(message: string, public status = 400) { super(message) } }
+export class HttpError extends Error {
+  status: number
+  constructor(message: string, status = 400) { super(message); this.status = status }
+}
 
 export async function requireAuth(request: Request, env: Env, roles: Role[] = ['admin', 'manager', 'categorizer', 'viewer']) {
   const authorization = request.headers.get('Authorization') || ''

@@ -1,0 +1,22 @@
+/* Navigation shell only. Component styling remains in admin-ui.css. */
+.admin-sidebar-backdrop { display: none; }
+.admin-status { display: inline-flex; align-items: center; gap: 7px; }
+.admin-status i { width: 7px; height: 7px; border-radius: 50%; background: var(--green); box-shadow: 0 0 0 4px rgba(74,222,128,.1); }
+.dashboard-actions { display: flex; align-items: center; gap: 8px; }
+.admin-mobile-nav { display: none; }
+
+@media (max-width: 760px) {
+  .admin-main { padding-bottom: 76px; }
+  .admin-sidebar-backdrop { position: fixed; z-index: 44; inset: 0; display: block; visibility: hidden; background: rgba(0,0,0,.62); opacity: 0; transition: opacity .18s ease, visibility .18s ease; }
+  .admin-sidebar-backdrop.is-visible { visibility: visible; opacity: 1; }
+  .admin-sidebar { z-index: 45; box-shadow: 18px 0 36px rgba(0,0,0,.26); }
+  .admin-mobile-nav { position: fixed; z-index: 35; right: 0; bottom: 0; left: 0; display: grid; grid-template-columns: repeat(3, 1fr); gap: 3px; padding: 7px max(8px, env(safe-area-inset-left)) calc(7px + env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-right)); border-top: 1px solid var(--line); background: rgba(26,26,26,.96); box-shadow: 0 -10px 24px rgba(0,0,0,.2); backdrop-filter: blur(15px); }
+  .admin-mobile-nav .admin-nav-link { flex-direction: column; justify-content: center; gap: 3px; min-height: 54px; padding: 6px 4px; border-radius: 8px; font-size: 9px; text-align: center; }
+  .admin-mobile-nav .admin-nav-link.active { background: rgba(179,18,28,.2); color: var(--red-light); }
+  .admin-mobile-nav .admin-nav-link b { display: none; }
+  .admin-header { gap: 8px; }
+  .admin-header h1 { font-size: 19px; }
+  .admin-header .admin-status { font-size: 9px; }
+  .dashboard-actions { width: 100%; }
+  .dashboard-actions .button { flex: 1; }
+}
